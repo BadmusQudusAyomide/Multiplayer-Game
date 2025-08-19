@@ -17,6 +17,7 @@ export function getLobbySocket(token?: string) {
       withCredentials: true,
       auth: token ? { token } : undefined,
       autoConnect: !!token,
+      transports: ['websocket', 'polling'],
     });
     lobbySocket.on('connect_error', (err) => {
       console.error('lobby socket connect_error', err?.message || err);
@@ -35,6 +36,7 @@ export function getChatSocket(token?: string) {
       withCredentials: true,
       auth: token ? { token } : undefined,
       autoConnect: !!token,
+      transports: ['websocket', 'polling'],
     });
     chatSocket.on('connect_error', (err) => {
       console.error('chat socket connect_error', err?.message || err);
@@ -67,12 +69,21 @@ export const lobbyApi = {
       if (s.disconnected) s.connect();
     }
   },
-  acceptAi: (gameType: GameType, token: string) => {
+  acceptAi: (gameType: GameType, token: string, difficulty: 'easy' | 'medium' | 'hard' = 'medium') => {
     const s = getLobbySocket(token);
     if (s.connected) {
-      s.emit('ai.accept', { gameType });
+      s.emit('ai.accept', { gameType, difficulty });
     } else {
-      s.once('connect', () => s.emit('ai.accept', { gameType }));
+      s.once('connect', () => s.emit('ai.accept', { gameType, difficulty }));
+      if (s.disconnected) s.connect();
+    }
+  },
+  quit: (matchId: string, token: string) => {
+    const s = getMatchSocket(token);
+    if (s.connected) {
+      s.emit('match.quit', { matchId });
+    } else {
+      s.once('connect', () => s.emit('match.quit', { matchId }));
       if (s.disconnected) s.connect();
     }
   },
@@ -84,6 +95,7 @@ export function getMatchSocket(token?: string) {
       withCredentials: true,
       auth: token ? { token } : undefined,
       autoConnect: !!token,
+      transports: ['websocket', 'polling'],
     });
     matchSocket.on('connect_error', (err) => {
       console.error('match socket connect_error', err?.message || err);
@@ -121,6 +133,15 @@ export const matchApi = {
       s.emit('move.submit', { matchId, payload: { choice } });
     } else {
       s.once('connect', () => s.emit('move.submit', { matchId, payload: { choice } }));
+      if (s.disconnected) s.connect();
+    }
+  },
+  rematch: (matchId: string, token: string) => {
+    const s = getMatchSocket(token);
+    if (s.connected) {
+      s.emit('rematch.request', { matchId });
+    } else {
+      s.once('connect', () => s.emit('rematch.request', { matchId }));
       if (s.disconnected) s.connect();
     }
   },

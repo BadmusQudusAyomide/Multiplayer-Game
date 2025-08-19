@@ -33,6 +33,46 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'backend', time: new Date().toISOString() });
 });
 
+// Global stats endpoint for homepage hero
+app.get('/stats', async (_req, res) => {
+  try {
+    // Active players: unique userIds connected to match namespace
+    const sockets = await matchNs.fetchSockets();
+    const activeSet = new Set();
+    sockets.forEach((s) => {
+      const uid = s.data?.user?.userId;
+      if (uid) activeSet.add(uid.toString());
+    });
+    const activePlayers = activeSet.size;
+
+    // Aggregate wins and rating from Users
+    const users = await User.find({}, {
+      statsTTT: 1,
+      statsRPS: 1,
+      _id: 0,
+    }).lean();
+
+    let totalWins = 0;
+    let ratingSum = 0;
+    let ratingCount = 0;
+    for (const u of users) {
+      const ttt = u.statsTTT || {};
+      const rps = u.statsRPS || {};
+      totalWins += (ttt.wins || 0) + (rps.wins || 0);
+      const tttElo = ttt.elo ?? 1000;
+      const rpsElo = rps.elo ?? 1000;
+      ratingSum += (tttElo + rpsElo) / 2;
+      ratingCount += 1;
+    }
+    const avgRating = ratingCount ? Math.round((ratingSum / ratingCount) * 10) / 10 : 1000;
+
+    res.json({ activePlayers, totalWins, avgRating });
+  } catch (e) {
+    console.error('stats error', e);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Auth routes
 app.post('/auth/signup', async (req, res) => {
   try {
@@ -146,10 +186,12 @@ async function createHumanMatch(gameType, a, b) {
   lobbyNs.to(b.socket.id).emit('match.found', { matchId: match._id, room });
 }
 
-async function createAiMatch(gameType, player) {
+async function createAiMatch(gameType, player, difficulty = 'medium') {
   const match = await Match.create({ gameType, status: 'active', players: [player.userId], playedVs: 'ai' });
   const room = `match:${match._id.toString()}`;
   player.socket.join(room);
+  // store difficulty for this match
+  aiDifficulty.set(match._id.toString(), ['easy','medium','hard'].includes(difficulty) ? difficulty : 'medium');
   lobbyNs.to(player.socket.id).emit('match.found', { matchId: match._id, room, vs: 'ai' });
 }
 
@@ -184,57 +226,7 @@ lobbyNs.on('connection', (socket) => {
     joinTimeouts.set(socket.id, t);
   });
 
-  // Arena rematch: request a new round with same opponents
-  socket.on('rematch.request', async ({ matchId }) => {
-    try {
-      const match = await Match.findById(matchId);
-      if (!match) return;
-      const room = `match:${matchId}`;
-      const state = matches.get(matchId);
-      if (!state) return;
-
-      if (match.playedVs === 'ai') {
-        // Create new AI match immediately for requester
-        const newMatch = await Match.create({ gameType: match.gameType, status: 'active', players: [userId], playedVs: 'ai' });
-        const newId = newMatch._id.toString();
-        if (match.gameType === 'ttt') {
-          matches.set(newId, { gameType: 'ttt', playedVs: 'ai', board: Array(9).fill(null), turn: 0, players: [userId] });
-        } else {
-          matches.set(newId, { gameType: 'rps', playedVs: 'ai', choices: {}, players: [userId] });
-        }
-        matchNs.to(socket.id).emit('rematch.created', { matchId: newId, vs: 'ai' });
-        return;
-      }
-
-      // Human vs Human: record request and wait for both players
-      let set = rematchRequests.get(matchId);
-      if (!set) {
-        set = new Set();
-        rematchRequests.set(matchId, set);
-      }
-      set.add(userId);
-
-      const both = state.players.every((pid) => set.has(pid));
-      if (!both) {
-        matchNs.to(room).emit('rematch.pending', { requester: userId });
-        return;
-      }
-
-      // Both requested: create new match with same players
-      const newMatch = await Match.create({ gameType: match.gameType, status: 'active', players: match.players, playedVs: 'human' });
-      const newId = newMatch._id.toString();
-      if (match.gameType === 'ttt') {
-        matches.set(newId, { gameType: 'ttt', playedVs: 'human', board: Array(9).fill(null), turn: 0, players: match.players.map((p) => p.toString()) });
-      } else {
-        matches.set(newId, { gameType: 'rps', playedVs: 'human', choices: {}, players: match.players.map((p) => p.toString()) });
-      }
-      const sockets = await matchNs.in(room).fetchSockets();
-      sockets.forEach((s) => matchNs.to(s.id).emit('rematch.created', { matchId: newId, vs: 'human' }));
-      rematchRequests.delete(matchId);
-    } catch (e) {
-      console.error('rematch.request error', e);
-    }
-  });
+  // (moved) rematch.request is handled in match namespace
 
 
   socket.on('queue.leave', ({ gameType }) => {
@@ -245,14 +237,14 @@ lobbyNs.on('connection', (socket) => {
     if (t) clearTimeout(t);
   });
 
-  socket.on('ai.accept', ({ gameType }) => {
+  socket.on('ai.accept', ({ gameType, difficulty }) => {
     if (!auth) return;
     if (!['ttt', 'rps'].includes(gameType)) return;
     // Remove from queue if still there
     queues[gameType] = queues[gameType].filter((q) => q.userId !== auth.userId);
     const t = joinTimeouts.get(socket.id);
     if (t) clearTimeout(t);
-    createAiMatch(gameType, { userId: auth.userId, socket }).catch(console.error);
+    createAiMatch(gameType, { userId: auth.userId, socket }, difficulty).catch(console.error);
   });
 
   socket.on('disconnect', () => {
@@ -282,6 +274,8 @@ chatNs.on('connection', (socket) => {
 const matches = new Map();
 // Track rematch requests: matchId -> Set(userId)
 const rematchRequests = new Map();
+// Track AI difficulty per matchId: 'easy' | 'medium' | 'hard'
+const aiDifficulty = new Map();
 
 function tttCheckWinner(board) {
   const lines = [
@@ -296,12 +290,22 @@ function tttCheckWinner(board) {
   return null;
 }
 
-function tttAiMove(board, aiMark, humanMark) {
+function tttAiMove(board, aiMark, humanMark, randomChance = 0.35) {
   const lines = [
     [0,1,2],[3,4,5],[6,7,8],
     [0,3,6],[1,4,7],[2,5,8],
     [0,4,8],[2,4,6]
   ];
+
+  const empty = board
+    .map((v, i) => (v === null ? i : -1))
+    .filter((i) => i >= 0);
+
+  // Difficulty-based randomness to be less perfect
+  if (empty.length && Math.random() < randomChance) {
+    return empty[Math.floor(Math.random() * empty.length)];
+  }
+
   // Try to win
   for (const [a,b,c] of lines) {
     const line = [board[a], board[b], board[c]];
@@ -443,11 +447,34 @@ matchNs.on('connection', (socket) => {
   async function emitStateForAll(matchId, room) {
     const state = matches.get(matchId);
     if (!state) return;
+    // Build playersInfo with usernames
+    let playersInfo = [];
+    try {
+      if (state.playedVs === 'human' && state.players.length === 2) {
+        const [u1, u2] = state.players;
+        const [a, b] = await Promise.all([
+          User.findById(u1, { username: 1 }).lean(),
+          User.findById(u2, { username: 1 }).lean(),
+        ]);
+        playersInfo = [
+          { id: u1, username: a?.username || 'Player 1' },
+          { id: u2, username: b?.username || 'Player 2' },
+        ];
+      } else {
+        const u1 = state.players[0];
+        const a = await User.findById(u1, { username: 1 }).lean();
+        playersInfo = [
+          { id: u1, username: a?.username || 'You' },
+          { id: 'AI', username: 'AI' },
+        ];
+      }
+    } catch {}
+
     const sockets = await matchNs.in(room).fetchSockets();
     sockets.forEach((s) => {
       const uid = s.data?.user?.userId;
       const seat = state.players[0] === uid ? 0 : 1;
-      matchNs.to(s.id).emit('state.update', { ...state, seat, matchId });
+      matchNs.to(s.id).emit('state.update', { ...state, seat, matchId, playersInfo });
     });
   }
 
@@ -469,6 +496,7 @@ matchNs.on('connection', (socket) => {
             board: Array(9).fill(null),
             turn: 0, // 0 -> X (players[0]), 1 -> O (players[1] or AI)
             players: match.players.map((p) => p.toString()),
+            difficulty: aiDifficulty.get(matchId) || 'medium',
           });
         } else {
           matches.set(matchId, {
@@ -476,13 +504,36 @@ matchNs.on('connection', (socket) => {
             playedVs: match.playedVs,
             choices: {}, // userId -> 'rock'|'paper'|'scissors'
             players: match.players.map((p) => p.toString()),
+            difficulty: aiDifficulty.get(matchId) || 'medium',
           });
         }
       }
 
       const state = matches.get(matchId);
       const seat = state.players[0] === userId ? 0 : 1;
-      matchNs.to(socket.id).emit('state.update', { ...state, seat, matchId });
+      // Build playersInfo for initial emit
+      let playersInfo = [];
+      try {
+        if (state.playedVs === 'human' && state.players.length === 2) {
+          const [u1, u2] = state.players;
+          const [a, b] = await Promise.all([
+            User.findById(u1, { username: 1 }).lean(),
+            User.findById(u2, { username: 1 }).lean(),
+          ]);
+          playersInfo = [
+            { id: u1, username: a?.username || 'Player 1' },
+            { id: u2, username: b?.username || 'Player 2' },
+          ];
+        } else {
+          const u1 = state.players[0];
+          const a = await User.findById(u1, { username: 1 }).lean();
+          playersInfo = [
+            { id: u1, username: a?.username || 'You' },
+            { id: 'AI', username: 'AI' },
+          ];
+        }
+      } catch {}
+      matchNs.to(socket.id).emit('state.update', { ...state, seat, matchId, playersInfo });
     } catch (e) {
       console.error('match.join error', e);
     }
@@ -523,7 +574,11 @@ matchNs.on('connection', (socket) => {
         if (match.playedVs === 'ai') {
           const aiSeat = state.players[1] ? 1 : 1; // AI is seat 1 (O)
           if (state.turn === aiSeat) {
-            const aiIdx = tttAiMove(state.board, 'O', 'X');
+            // Map difficulty to random chance
+            const diff = aiDifficulty.get(matchId) || state.difficulty || 'medium';
+            const randMap = { easy: 0.7, medium: 0.35, hard: 0.1 };
+            const randomChance = randMap[diff] ?? 0.35;
+            const aiIdx = tttAiMove(state.board, 'O', 'X', randomChance);
             if (aiIdx >= 0) {
               state.board[aiIdx] = 'O';
               state.turn = 1 - state.turn;
@@ -532,7 +587,7 @@ matchNs.on('connection', (socket) => {
               if (result2) {
                 let winner = null;
                 if (result2 === 'X') winner = match.players[0];
-                else if (result2 === 'O') winner = null; // AI won, no user id
+                else if (result2 === 'O') winner = 'AI'; // AI wins
                 else winner = null; // draw
                 await finalizeMatch(matchId, winner);
                 matchNs.to(room).emit('match.end', { winner: winner?.toString() || null, result: result2 });
@@ -555,7 +610,7 @@ matchNs.on('connection', (socket) => {
           const res = rpsWinner(userChoice, aiChoice);
           let winner = null;
           if (res === 'a') winner = match.players[0];
-          else if (res === 'b') winner = null; // AI wins
+          else if (res === 'b') winner = 'AI'; // AI wins
           await finalizeMatch(matchId, winner);
           matchNs.to(room).emit('match.end', { winner: winner?.toString() || null, result: res, aiChoice });
         } else {
@@ -581,6 +636,88 @@ matchNs.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('match disconnected', socket.id);
   });
+
+  // Player quits: treat as forfeit and finalize match so leaderboard updates
+  socket.on('match.quit', async ({ matchId }) => {
+    try {
+      const room = `match:${matchId}`;
+      const match = await Match.findById(matchId);
+      if (!match) return;
+      if (match.status === 'finished') return; // already done
+      const state = matches.get(matchId);
+      if (!state) return; // no state -> ignore
+
+      let winner = null;
+      if (match.playedVs === 'ai') {
+        winner = 'AI';
+      } else if (state.players && state.players.length === 2) {
+        // Opponent gets the win
+        const isP0 = state.players[0] === userId;
+        const isP1 = state.players[1] === userId;
+        if (!isP0 && !isP1) return; // not a participant
+        winner = isP0 ? match.players[1] : match.players[0];
+      }
+
+      await finalizeMatch(matchId, winner);
+      matchNs.to(room).emit('match.end', { winner: winner?.toString() || null, result: 'forfeit' });
+    } catch (e) {
+      console.error('match.quit error', e);
+    }
+  });
+
+  // Arena rematch: handled inside match namespace so we have authenticated user context
+  socket.on('rematch.request', async ({ matchId }) => {
+    try {
+      const room = `match:${matchId}`;
+      const match = await Match.findById(matchId);
+      if (!match) return;
+      const state = matches.get(matchId);
+      if (!state) return;
+
+      // AI mode: create a brand new match for requester immediately
+      if (match.playedVs === 'ai') {
+        const newMatch = await Match.create({ gameType: match.gameType, status: 'active', players: [userId], playedVs: 'ai' });
+        const newId = newMatch._id.toString();
+        if (match.gameType === 'ttt') {
+          matches.set(newId, { gameType: 'ttt', playedVs: 'ai', board: Array(9).fill(null), turn: 0, players: [userId], difficulty: aiDifficulty.get(matchId) || 'medium' });
+        } else {
+          matches.set(newId, { gameType: 'rps', playedVs: 'ai', choices: {}, players: [userId], difficulty: aiDifficulty.get(matchId) || 'medium' });
+        }
+        // carry forward difficulty
+        if (aiDifficulty.has(matchId)) aiDifficulty.set(newId, aiDifficulty.get(matchId));
+        matchNs.to(socket.id).emit('rematch.created', { matchId: newId, vs: 'ai' });
+        return;
+      }
+
+      // Human vs Human: record request and wait for both players
+      let set = rematchRequests.get(matchId);
+      if (!set) {
+        set = new Set();
+        rematchRequests.set(matchId, set);
+      }
+      set.add(userId);
+
+      const both = state.players.every((pid) => set.has(pid));
+      if (!both) {
+        matchNs.to(room).emit('rematch.pending', { requester: userId });
+        return;
+      }
+
+      // Both requested: create new match with same players
+      const newMatch = await Match.create({ gameType: match.gameType, status: 'active', players: match.players, playedVs: 'human' });
+      const newId = newMatch._id.toString();
+      if (match.gameType === 'ttt') {
+        matches.set(newId, { gameType: 'ttt', playedVs: 'human', board: Array(9).fill(null), turn: 0, players: match.players.map((p) => p.toString()) });
+      } else {
+        matches.set(newId, { gameType: 'rps', playedVs: 'human', choices: {}, players: match.players.map((p) => p.toString()) });
+      }
+      const sockets = await matchNs.in(room).fetchSockets();
+      sockets.forEach((s) => matchNs.to(s.id).emit('rematch.created', { matchId: newId, vs: 'human' }));
+      rematchRequests.delete(matchId);
+    } catch (e) {
+      console.error('rematch.request error', e);
+    }
+  });
 });
 
 async function start() {
@@ -595,6 +732,8 @@ async function start() {
 }
 
 start();
+
+
 
 
 

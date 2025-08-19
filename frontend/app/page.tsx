@@ -26,12 +26,27 @@ export default function Home() {
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const firstActionRef = useRef<HTMLAnchorElement | null>(null);
+  const [stats, setStats] = useState<{ activePlayers: number; totalWins: number; avgRating: number }>({ activePlayers: 0, totalWins: 0, avgRating: 1000 });
 
   const token = useAuth((s) => s.token);
   const setToken = useAuth((s) => s.setToken);
 
   useEffect(() => {
     setIsVisible(true);
+  }, []);
+
+  // Fetch real-time stats for hero section
+  useEffect(() => {
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '');
+    if (!base) return;
+    fetch(`${base}/stats`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (typeof data?.activePlayers === 'number' && typeof data?.totalWins === 'number' && typeof data?.avgRating === 'number') {
+          setStats({ activePlayers: data.activePlayers, totalWins: data.totalWins, avgRating: data.avgRating });
+        }
+      })
+      .catch(() => { /* ignore */ });
   }, []);
 
   // Close modal on Escape
@@ -81,6 +96,12 @@ export default function Home() {
       icon: Zap
     }
   ];
+
+  const formatCompact = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return String(n);
+  };
 
   const features = [
     { icon: Users, title: 'Real-time Multiplayer', desc: 'Challenge friends instantly' },
@@ -165,12 +186,12 @@ export default function Home() {
               Challenge players worldwide or test your skills against our advanced AI.
             </p>
 
-            {/* Quick Stats */}
+            {/* Quick Stats (live) */}
             <div className="flex flex-wrap justify-center gap-8 mb-12">
               {[
-                { icon: Users, value: '10K+', label: 'Active Players' },
-                { icon: Swords, value: '50K+', label: 'Battles Won' },
-                { icon: Star, value: '4.9', label: 'Rating' }
+                { icon: Users, value: formatCompact(stats.activePlayers), label: 'Active Players' },
+                { icon: Swords, value: formatCompact(stats.totalWins), label: 'Battles Won' },
+                { icon: Star, value: Number.isFinite(stats.avgRating) ? stats.avgRating.toFixed(1) : '—', label: 'Avg Rating' }
               ].map((stat, i) => (
                 <div key={i} className="text-center">
                   <div className="flex items-center justify-center gap-2 mb-1">
