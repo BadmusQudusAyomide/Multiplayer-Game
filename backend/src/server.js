@@ -12,7 +12,10 @@ import { User } from './models/User.js';
 import { Match } from './models/Match.js';
 
 const PORT = process.env.PORT || 4000;
-const CORS_ORIGIN = process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'];
+const CORS_ORIGIN = (process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
+  : ['http://localhost:3000']
+);
 const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET || 'change_me_access';
 
@@ -795,7 +798,10 @@ async function start() {
   try {
     await mongoose.connect(MONGODB_URI);
     console.log('Mongo connected');
-    server.listen(PORT, () => console.log(`API listening on :${PORT}`));
+    server.listen(PORT, () => {
+      console.log(`API listening on :${PORT}`);
+      console.log('Allowed CORS origins:', CORS_ORIGIN);
+    });
   } catch (err) {
     console.error('Failed to start server', err);
     process.exit(1);

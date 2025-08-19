@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { matchApi, getMatchSocket } from '@/src/lib/socket';
+import { matchApi, getMatchSocket, disconnectMatchSocket } from '@/src/lib/socket';
 import { useAuth } from '@/src/store/useAuth';
 import { useMatch } from '@/src/store/useMatch';
 import {
@@ -185,7 +185,7 @@ export default function MatchPage() {
     if (!cellValue) return null;
 
     const isAnimating = animateMove === index;
-    const symbolClass = `w-12 h-12 ${cellValue === 'X'
+    const symbolClass = `w-9 h-9 sm:w-12 sm:h-12 ${cellValue === 'X'
         ? 'text-red-500'
         : 'text-blue-500'
       } ${isAnimating ? 'animate-bounce' : ''}`;
@@ -199,13 +199,13 @@ export default function MatchPage() {
     const board: (null | 'X' | 'O')[] = state?.board || Array(9).fill(null);
 
     return (
-      <div className="flex flex-col items-center space-y-8">
-        <div className="grid grid-cols-3 gap-4 p-6 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20">
+      <div className="flex flex-col items-center space-y-6 sm:space-y-8 w-full">
+        <div className="grid grid-cols-3 gap-2 sm:gap-4 p-3 sm:p-6 bg-white/10 backdrop-blur-md rounded-2xl sm:rounded-3xl border border-white/20 w-full max-w-[90vw] sm:max-w-[380px] md:max-w-[420px]">
           {board.map((cell, i) => (
             <button
               key={i}
               onClick={() => submitTtt(i)}
-              className={`w-24 h-24 lg:w-28 lg:h-28 rounded-2xl border-2 flex items-center justify-center transition-all duration-300 transform hover:scale-105 ${cell
+              className={`aspect-square w-full rounded-2xl border-2 flex items-center justify-center transition-all duration-300 transform hover:scale-105 ${cell
                   ? 'bg-white/20 border-white/40 cursor-not-allowed'
                   : myTurn && !roundOver
                     ? 'bg-white/5 border-white/30 hover:bg-white/20 hover:border-white/60 cursor-pointer shadow-lg hover:shadow-2xl'
@@ -229,20 +229,20 @@ export default function MatchPage() {
     ] as const;
 
     return (
-      <div className="flex flex-col items-center space-y-8">
-        <div className="flex flex-wrap justify-center gap-6">
+      <div className="flex flex-col items-center space-y-6 sm:space-y-8">
+        <div className="flex flex-wrap justify-center gap-4 sm:gap-6">
           {choices.map((choice) => (
             <button
               key={choice.name}
               onClick={() => submitRps(choice.name)}
-              className={`group relative p-8 rounded-3xl border-2 transition-all duration-300 transform hover:scale-110 ${roundOver
+              className={`group relative p-4 sm:p-6 md:p-8 rounded-3xl border-2 transition-all duration-300 transform hover:scale-105 sm:hover:scale-110 ${roundOver
                   ? 'bg-gray-500/20 border-gray-500/30 cursor-not-allowed opacity-50'
                   : `bg-gradient-to-br ${choice.gradient} border-white/30 hover:border-white/60 cursor-pointer shadow-2xl hover:shadow-3xl`
                 }`}
               disabled={!!roundOver}
             >
-              <div className="text-6xl mb-4 group-hover:animate-pulse">{choice.emoji}</div>
-              <div className="text-white font-bold text-xl capitalize">{choice.name}</div>
+              <div className="text-4xl sm:text-5xl md:text-6xl mb-2 sm:mb-4 group-hover:animate-pulse">{choice.emoji}</div>
+              <div className="text-white font-bold text-lg sm:text-xl capitalize text-center">{choice.name}</div>
             </button>
           ))}
         </div>
@@ -305,24 +305,24 @@ export default function MatchPage() {
     const oppName = opp?.username || (state.playedVs === 'ai' ? 'AI' : 'Opponent');
 
     return (
-      <div className="flex justify-center gap-8">
-        <div className="flex items-center gap-3 p-4 bg-white/10 rounded-2xl border border-white/20">
+      <div className="flex flex-col sm:flex-row justify-center items-stretch sm:items-center gap-4 sm:gap-8 px-2">
+        <div className="flex items-center gap-3 p-3 sm:p-4 bg-white/10 rounded-2xl border border-white/20">
           <div className="p-2 bg-red-500/20 rounded-lg">
-            {isPlayerX ? <X className="w-6 h-6 text-red-400" /> : <Circle className="w-6 h-6 text-blue-400" />}
+            {isPlayerX ? <X className="w-5 h-5 sm:w-6 sm:h-6 text-red-400" /> : <Circle className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400" />}
           </div>
           <div>
-            <div className="text-white font-semibold">{myName}</div>
-            <div className="text-sm text-gray-300">Playing {playerSymbol}</div>
+            <div className="text-white font-semibold text-sm sm:text-base">{myName}</div>
+            <div className="text-xs sm:text-sm text-gray-300">Playing {playerSymbol}</div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 p-4 bg-white/5 rounded-2xl border border-white/10">
+        <div className="flex items-center gap-3 p-3 sm:p-4 bg-white/5 rounded-2xl border border-white/10">
           <div className="p-2 bg-gray-500/20 rounded-lg">
-            {!isPlayerX ? <X className="w-6 h-6 text-red-400" /> : <Circle className="w-6 h-6 text-blue-400" />}
+            {!isPlayerX ? <X className="w-5 h-5 sm:w-6 sm:h-6 text-red-400" /> : <Circle className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400" />}
           </div>
           <div>
-            <div className="text-gray-300 font-semibold">{oppName}</div>
-            <div className="text-sm text-gray-400">Playing {opponentSymbol}</div>
+            <div className="text-gray-300 font-semibold text-sm sm:text-base">{oppName}</div>
+            <div className="text-xs sm:text-sm text-gray-400">Playing {opponentSymbol}</div>
           </div>
         </div>
       </div>
@@ -370,7 +370,7 @@ export default function MatchPage() {
                   </div>
                 )}
                 <button
-                  onClick={() => router.push('/online')}
+                  onClick={() => { if (token) { matchApi.quit(id, token); } disconnectMatchSocket(); reset(); router.push('/online'); }}
                   className="flex items-center gap-2 px-3 py-1 bg-white/10 rounded-lg text-sm text-purple-200 hover:bg-white/20 transition-colors"
                   title="See online players"
                 >
@@ -391,7 +391,7 @@ export default function MatchPage() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => { if (token) { matchApi.quit(id, token); } reset(); router.push('/'); }}
+                  onClick={() => { if (token) { matchApi.quit(id, token); } disconnectMatchSocket(); reset(); router.push('/'); }}
                   className="flex-1 py-2 px-4 bg-gradient-to-r from-red-500 to-pink-600 text-white font-semibold rounded-xl hover:from-red-600 hover:to-pink-700"
                 >
                   Exit
@@ -434,7 +434,7 @@ export default function MatchPage() {
 
         {/* Player Info */}
         {state && (
-          <div className="mb-12">
+          <div className="mb-12 flex flex-wrap justify-center">
             {getPlayerInfo()}
           </div>
         )}
@@ -512,7 +512,7 @@ export default function MatchPage() {
                   Continue Playing
                 </button>
                 <button
-                  onClick={() => { reset(); router.push('/'); }}
+                  onClick={() => { if (token) { matchApi.quit(id, token); } disconnectMatchSocket(); reset(); router.push('/'); }}
                   className="flex-1 py-3 px-6 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold rounded-2xl hover:from-emerald-600 hover:to-teal-700 transition-all duration-300 transform hover:scale-105"
                 >
                   Exit Arena
@@ -523,27 +523,29 @@ export default function MatchPage() {
         )}
 
         {/* Quick Actions */}
-        <div className="fixed bottom-6 right-6 flex flex-col gap-3">
-          {/* Quit to show final modal */}
-          <button
-            onClick={() => setShowQuitModal(true)}
-            className="p-4 bg-gradient-to-r from-rose-500 to-red-600 backdrop-blur-md rounded-full border border-white/20 text-white hover:from-rose-600 hover:to-red-700 transition-all duration-300 transform hover:scale-110 shadow-2xl"
-            title="Quit and view Game Over"
-          >
-            <Trophy className="w-6 h-6" />
-          </button>
-          <button
-            onClick={() => router.push('/')}
-            className="p-4 bg-white/10 backdrop-blur-md rounded-full border border-white/20 text-white hover:bg-white/20 transition-all duration-300 transform hover:scale-110 shadow-2xl"
-            title="Home"
-          >
-            <Home className="w-6 h-6" />
-          </button>
+        <div className="fixed inset-x-0 bottom-3 sm:inset-auto sm:bottom-6 sm:right-6 flex justify-center sm:justify-end gap-3">
+          <div className="flex flex-row sm:flex-col gap-3">
+            {/* Quit to show final modal */}
+            <button
+              onClick={() => setShowQuitModal(true)}
+              className="p-3 sm:p-4 bg-gradient-to-r from-rose-500 to-red-600 backdrop-blur-md rounded-full border border-white/20 text-white hover:from-rose-600 hover:to-red-700 transition-all duration-300 transform hover:scale-105 sm:hover:scale-110 shadow-2xl"
+              title="Quit and view Game Over"
+            >
+              <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
+            </button>
+            <button
+              onClick={() => { if (token) { matchApi.quit(id, token); } disconnectMatchSocket(); reset(); router.push('/'); }}
+              className="p-3 sm:p-4 bg-white/10 backdrop-blur-md rounded-full border border-white/20 text-white hover:bg-white/20 transition-all duration-300 transform hover:scale-105 sm:hover:scale-110 shadow-2xl"
+              title="Home"
+            >
+              <Home className="w-5 h-5 sm:w-6 sm:h-6" />
+            </button>
+          </div>
         </div>
 
         {/* Lightweight round result toast */}
         {lastResult && (
-          <div className="fixed top-6 left-0 right-0 flex justify-center z-40">
+          <div className="fixed inset-x-0 bottom-24 flex justify-center z-40">
             <div className="px-4 py-2 bg-white/10 border border-white/20 rounded-full text-purple-200 backdrop-blur-md">
               <span className="font-semibold">Round Result:</span> {JSON.stringify(lastResult)}
             </div>

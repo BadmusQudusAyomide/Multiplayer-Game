@@ -185,3 +185,12 @@ export function disconnectAllSockets() {
   chatSocket?.disconnect();
   matchSocket?.disconnect();
 }
+
+// Disconnect only the match namespace socket
+export function disconnectMatchSocket() {
+  try {
+    matchSocket?.disconnect();
+  } catch (e) {
+    // no-op
+  }
+}

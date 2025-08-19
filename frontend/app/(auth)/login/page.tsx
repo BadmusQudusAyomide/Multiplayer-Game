@@ -17,22 +17,33 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/login`, {
+      const base = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '');
+      if (!base) throw new Error('API base URL is not configured. Set NEXT_PUBLIC_API_BASE_URL');
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 15000); // 15s timeout for cold starts
+      const url = `${base}/auth/login`;
+      // debug target URL (visible in browser console only)
+      if (typeof window !== 'undefined') console.debug('Login request to', url);
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // send as both email and username so backend can match either
         body: JSON.stringify({ email: identifier, username: identifier, password }),
+        signal: controller.signal,
       });
+      clearTimeout(t);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        throw new Error(j.message || 'Login failed');
+        const reason = j.message || res.statusText || `HTTP ${res.status}`;
+        throw new Error(`Login failed: ${reason}`);
       }
       const data = await res.json();
       setToken(data.token);
       updateAllSocketAuth(data.token);
       router.push('/');
     } catch (err: any) {
-      setError(err.message);
+      if (err?.name === 'AbortError') setError('Request timed out. Please try again in a few seconds.');
+      else setError(err?.message || 'Login failed');
     } finally {
       setLoading(false);
     }

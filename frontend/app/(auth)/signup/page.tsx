@@ -18,11 +18,17 @@ export default function SignupPage() {
     setError(null);
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/signup`, {
+      const base = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '');
+      if (!base) throw new Error('API base URL is not configured. Set NEXT_PUBLIC_API_BASE_URL');
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 15000); // 15s timeout for cold starts
+      const res = await fetch(`${base}/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, username, password }),
+        signal: controller.signal,
       });
+      clearTimeout(t);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.message || 'Signup failed');

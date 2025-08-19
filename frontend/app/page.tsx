@@ -266,52 +266,52 @@ export default function Home() {
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={() => setModeOpen(false)}
               />
-              <div className="relative z-10 w-full max-w-xl mx-auto p-6 md:p-8 rounded-2xl border border-purple-400/30 bg-gradient-to-br from-slate-900 to-purple-900 shadow-2xl">
-                <div className="flex items-start justify-between mb-4">
+              <div className="relative z-10 w-full max-w-md sm:max-w-xl mx-4 sm:mx-auto p-4 md:p-8 rounded-2xl border border-purple-400/30 bg-gradient-to-br from-slate-900 to-purple-900 shadow-2xl max-h-[85vh] overflow-auto">
+                <div className="flex items-start justify-between mb-3 sm:mb-4">
                   <div>
-                    <h3 id="mode-title" className="text-2xl font-bold text-white">Choose Mode</h3>
-                    <p className="text-purple-200">How do you want to play {game === 'ttt' ? 'Tic‑Tac‑Toe' : 'Rock‑Paper‑Scissors'}?</p>
+                    <h3 id="mode-title" className="text-xl sm:text-2xl font-bold text-white">Choose Mode</h3>
+                    <p className="text-purple-200 text-sm sm:text-base">How do you want to play {game === 'ttt' ? 'Tic‑Tac‑Toe' : 'Rock‑Paper‑Scissors'}?</p>
                   </div>
                   <button
                     aria-label="Close"
-                    className="text-purple-200 hover:text-white"
+                    className="text-purple-200 hover:text-white text-lg sm:text-xl"
                     onClick={() => setModeOpen(false)}
                   >
                     ✕
                   </button>
                 </div>
 
-                <div className="grid md:grid-cols-2 gap-4">
+                <div className="grid md:grid-cols-2 gap-3 sm:gap-4">
                   <Link
                     href={`/play/${game}?mode=player`}
-                    className="group relative p-6 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 transform hover:scale-[1.02] shadow-xl hover:shadow-blue-500/25 flex items-center justify-between"
+                    className="group relative p-4 sm:p-6 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 transform hover:scale-[1.02] shadow-xl hover:shadow-blue-500/25 flex items-center justify-between"
                     onClick={() => setModeOpen(false)}
                     ref={firstActionRef}
                     tabIndex={0}
                   >
                     <div className="text-left">
                       <div className="flex items-center gap-2 mb-1">
-                        <Users className="w-6 h-6" />
-                        <span>Play vs Player</span>
+                        <Users className="w-5 h-5 sm:w-6 sm:h-6" />
+                        <span className="text-sm sm:text-base">Play vs Player</span>
                       </div>
-                      <p className="text-blue-100 text-xs font-normal">Match with real opponents</p>
+                      <p className="text-blue-100 text-xs sm:text-sm font-normal">Match with real opponents</p>
                     </div>
-                    <Play className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
+                    <Play className="w-5 h-5 sm:w-6 sm:h-6 group-hover:translate-x-1 transition-transform" />
                   </Link>
 
                   <Link
                     href={`/play/${game}?mode=ai`}
-                    className="group relative p-6 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold hover:from-emerald-600 hover:to-teal-700 transition-all duration-300 transform hover:scale-[1.02] shadow-xl hover:shadow-emerald-500/25 flex items-center justify-between"
+                    className="group relative p-4 sm:p-6 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold hover:from-emerald-600 hover:to-teal-700 transition-all duration-300 transform hover:scale-[1.02] shadow-xl hover:shadow-emerald-500/25 flex items-center justify-between"
                     onClick={() => setModeOpen(false)}
                   >
                     <div className="text-left">
                       <div className="flex items-center gap-2 mb-1">
-                        <Brain className="w-6 h-6" />
-                        <span>Play vs AI</span>
+                        <Brain className="w-5 h-5 sm:w-6 sm:h-6" />
+                        <span className="text-sm sm:text-base">Play vs AI</span>
                       </div>
-                      <p className="text-emerald-100 text-xs font-normal">Practice with smart AI</p>
+                      <p className="text-emerald-100 text-xs sm:text-sm font-normal">Practice with smart AI</p>
                     </div>
-                    <Play className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
+                    <Play className="w-5 h-5 sm:w-6 sm:h-6 group-hover:translate-x-1 transition-transform" />
                   </Link>
                 </div>
 
