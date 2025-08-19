@@ -138,18 +138,18 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 justify-end">
             {!token ? (
               <>
                 <Link
                   href="/login"
-                  className="px-4 py-2 rounded-xl border border-purple-400/30 text-white hover:bg-white/10 transition-all backdrop-blur-sm"
+                  className="px-3 py-2 sm:px-4 sm:py-2 text-sm sm:text-base rounded-xl border border-purple-400/30 text-white hover:bg-white/10 transition-all backdrop-blur-sm whitespace-nowrap"
                 >
                   Login
                 </Link>
                 <Link
                   href="/signup"
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold hover:from-emerald-600 hover:to-teal-600 transition-all shadow-lg hover:shadow-emerald-500/25"
+                  className="px-3 py-2 sm:px-4 sm:py-2 text-sm sm:text-base rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold hover:from-emerald-600 hover:to-teal-600 transition-all shadow-lg hover:shadow-emerald-500/25 whitespace-nowrap"
                 >
                   Sign up
                 </Link>
@@ -157,7 +157,7 @@ export default function Home() {
             ) : (
               <button
                 onClick={() => { setToken(null); disconnectAllSockets(); }}
-                className="px-4 py-2 rounded-xl border border-red-400/30 text-white hover:bg-red-500/20 transition-all backdrop-blur-sm"
+                className="px-3 py-2 sm:px-4 sm:py-2 text-sm sm:text-base rounded-xl border border-red-400/30 text-white hover:bg-red-500/20 transition-all backdrop-blur-sm whitespace-nowrap"
               >
                 Logout
               </button>

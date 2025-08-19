@@ -1,5 +1,6 @@
 "use client";
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/src/store/useAuth';
 import { updateAllSocketAuth } from '@/src/lib/socket';
@@ -37,14 +38,53 @@ export default function LoginPage() {
     }
   };
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Login</h1>
-      <form onSubmit={onSubmit} className="space-y-3">
-        <input className="w-full rounded border p-3" placeholder="Email or Username" value={identifier} onChange={e=>setIdentifier(e.target.value)} />
-        <input className="w-full rounded border p-3" type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button disabled={loading} className="w-full rounded bg-blue-600 p-3 text-white disabled:opacity-50">{loading? 'Logging in...' : 'Login'}</button>
-      </form>
+    <div className="mx-auto w-full max-w-sm py-8">
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-md text-white">
+        <div className="mb-5 text-center">
+          <h1 className="text-2xl font-bold">Welcome back</h1>
+          <p className="mt-1 text-sm text-purple-200">Log in to continue</p>
+        </div>
+
+        <form onSubmit={onSubmit} className="space-y-3">
+          <label className="block">
+            <span className="mb-1 block text-sm text-purple-200">Email or Username</span>
+            <input
+              className="w-full rounded-xl border border-white/10 bg-white/10 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
+              placeholder="you@example.com or yourname"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              autoComplete="username"
+              inputMode="email"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-sm text-purple-200">Password</span>
+            <input
+              className="w-full rounded-xl border border-white/10 bg-white/10 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+          </label>
+
+          {error && <p className="text-sm text-red-400">{error}</p>}
+
+          <button
+            disabled={loading}
+            className="w-full rounded-xl bg-blue-600 p-3 font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+          >
+            {loading ? 'Logging in…' : 'Login'}
+          </button>
+        </form>
+
+        <p className="mt-4 text-center text-sm text-purple-200">
+          New here?{' '}
+          <Link href="/signup" className="font-semibold text-white underline-offset-4 hover:underline">Create an account</Link>
+        </p>
+      </div>
     </div>
   );
 }
