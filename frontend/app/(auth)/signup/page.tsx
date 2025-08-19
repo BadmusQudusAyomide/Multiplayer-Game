@@ -38,8 +38,9 @@ export default function SignupPage() {
     }
   };
   return (
-    <div className="mx-auto w-full max-w-sm py-8">
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-md text-white">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center px-4">
+      <div className="mx-auto w-full max-w-sm py-8">
+        <div className="rounded-2xl border border-white/10 bg-black/30 p-6 backdrop-blur-md text-white shadow-xl">
         <div className="mb-5 text-center">
           <h1 className="text-2xl font-bold">Create account</h1>
           <p className="mt-1 text-sm text-purple-200">Join and start playing</p>
@@ -49,7 +50,7 @@ export default function SignupPage() {
           <label className="block">
             <span className="mb-1 block text-sm text-purple-200">Email</span>
             <input
-              className="w-full rounded-xl border border-white/10 bg-white/10 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
+              className="w-full rounded-xl border border-white/10 bg-black/20 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -62,7 +63,7 @@ export default function SignupPage() {
           <label className="block">
             <span className="mb-1 block text-sm text-purple-200">Username</span>
             <input
-              className="w-full rounded-xl border border-white/10 bg-white/10 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
+              className="w-full rounded-xl border border-white/10 bg-black/20 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
               placeholder="yourname"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -73,7 +74,7 @@ export default function SignupPage() {
           <label className="block">
             <span className="mb-1 block text-sm text-purple-200">Password</span>
             <input
-              className="w-full rounded-xl border border-white/10 bg-white/10 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
+              className="w-full rounded-xl border border-white/10 bg-black/20 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
               type="password"
               placeholder="••••••••"
               value={password}
@@ -96,6 +97,7 @@ export default function SignupPage() {
           Already have an account?{' '}
           <Link href="/login" className="font-semibold text-white underline-offset-4 hover:underline">Login</Link>
         </p>
+        </div>
       </div>
     </div>
   );

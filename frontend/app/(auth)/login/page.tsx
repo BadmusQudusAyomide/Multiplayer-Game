@@ -38,8 +38,9 @@ export default function LoginPage() {
     }
   };
   return (
-    <div className="mx-auto w-full max-w-sm py-8">
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-md text-white">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center px-4">
+      <div className="mx-auto w-full max-w-sm py-8">
+        <div className="rounded-2xl border border-white/10 bg-black/30 p-6 backdrop-blur-md text-white shadow-xl">
         <div className="mb-5 text-center">
           <h1 className="text-2xl font-bold">Welcome back</h1>
           <p className="mt-1 text-sm text-purple-200">Log in to continue</p>
@@ -49,7 +50,7 @@ export default function LoginPage() {
           <label className="block">
             <span className="mb-1 block text-sm text-purple-200">Email or Username</span>
             <input
-              className="w-full rounded-xl border border-white/10 bg-white/10 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
+              className="w-full rounded-xl border border-white/10 bg-black/20 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
               placeholder="you@example.com or yourname"
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
@@ -61,7 +62,7 @@ export default function LoginPage() {
           <label className="block">
             <span className="mb-1 block text-sm text-purple-200">Password</span>
             <input
-              className="w-full rounded-xl border border-white/10 bg-white/10 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
+              className="w-full rounded-xl border border-white/10 bg-black/20 p-3 text-white placeholder-purple-200/60 outline-none focus:ring-2 focus:ring-purple-400/60"
               type="password"
               placeholder="••••••••"
               value={password}
@@ -84,6 +85,7 @@ export default function LoginPage() {
           New here?{' '}
           <Link href="/signup" className="font-semibold text-white underline-offset-4 hover:underline">Create an account</Link>
         </p>
+        </div>
       </div>
     </div>
   );
