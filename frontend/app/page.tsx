@@ -113,7 +113,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-hidden relative">
       {/* Animated Background Elements */}
-      <div className="absolute inset-0 opacity-20">
+      <div className="absolute inset-0 opacity-20 hidden sm:block">
         <div className="absolute top-20 left-10 w-72 h-72 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl animate-pulse"></div>
         <div className="absolute top-40 right-10 w-72 h-72 bg-yellow-500 rounded-full mix-blend-multiply filter blur-xl animate-pulse delay-1000"></div>
         <div className="absolute -bottom-32 left-20 w-72 h-72 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl animate-pulse delay-500"></div>
@@ -167,27 +167,23 @@ export default function Home() {
 
         <div className="px-6 lg:px-8 pb-8">
           {/* Hero Section */}
-          <div className="text-center py-12 lg:py-20">
+          <div className="text-center py-10 lg:py-16">
             <div className="flex justify-center mb-6">
               <div className="p-4 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full animate-bounce">
                 <Crown className="w-12 h-12 text-white" />
               </div>
             </div>
 
-            <h1 className="text-5xl lg:text-7xl font-black mb-6 bg-gradient-to-r from-white via-purple-200 to-pink-200 bg-clip-text text-transparent leading-tight">
-              Battle. Compete. <br />
-              <span className="bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
-                Dominate.
-              </span>
+            <h1 className="text-3xl sm:text-5xl font-black mb-4 bg-gradient-to-r from-white via-purple-200 to-pink-200 bg-clip-text text-transparent leading-tight">
+              Play with friends. Anywhere.
             </h1>
 
-            <p className="text-xl lg:text-2xl text-purple-200 mb-8 max-w-3xl mx-auto leading-relaxed">
-              Enter the ultimate multiplayer arena where legends are born.
-              Challenge players worldwide or test your skills against our advanced AI.
+            <p className="text-base sm:text-lg text-purple-200 mb-6 max-w-2xl mx-auto leading-relaxed">
+              Fast multiplayer games. Simple. Mobile‑first.
             </p>
 
             {/* Quick Stats (live) */}
-            <div className="flex flex-wrap justify-center gap-8 mb-12">
+            <div className="hidden sm:flex flex-wrap justify-center gap-8 mb-10">
               {[
                 { icon: Users, value: formatCompact(stats.activePlayers), label: 'Active Players' },
                 { icon: Swords, value: formatCompact(stats.totalWins), label: 'Battles Won' },
@@ -205,13 +201,13 @@ export default function Home() {
           </div>
 
           {/* Game Selection */}
-          <div className="max-w-6xl mx-auto mb-16">
-            <div className="text-center mb-12">
-              <h2 className="text-4xl font-bold text-white mb-4">Choose Your Arena</h2>
-              <p className="text-purple-200 text-lg">Select your battlefield and prepare for glory</p>
+          <div className="max-w-6xl mx-auto mb-12">
+            <div className="text-center mb-6">
+              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Choose a game</h2>
+              <p className="text-purple-200 text-sm sm:text-base">Pick one to start</p>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
               {games.map((gameItem) => {
                 const IconComponent = gameItem.icon;
                 return (
@@ -247,7 +243,7 @@ export default function Home() {
                         </span>
                       </div>
                       {game === gameItem.id && (
-                        <div className="flex items-center gap-1 text-white font-semibold">
+                        <div className="flex items-center gap-1 text-white font-semibold text-sm">
                           <span>Selected</span>
                           <ChevronRight className="w-5 h-5" />
                         </div>

@@ -5,9 +5,6 @@ import { usePathname } from "next/navigation";
 import type { Route } from "next";
 
 const links: { href: Route; label: string }[] = [
-  { href: "/", label: "Home" },
-  { href: "/play", label: "Play" },
-  { href: "/match", label: "Match" },
   { href: "/online", label: "Online" },
   { href: "/leaderboard", label: "Leaderboard" },
 ];
