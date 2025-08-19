@@ -165,6 +165,8 @@ const queues = {
 };
 // Track timeouts to suggest AI
 const joinTimeouts = new Map(); // socketId -> timeoutId
+// Presence: userId -> { username, inMatch: boolean, socketId }
+const onlineUsers = new Map();
 
 function socketUser(socket) {
   try {
@@ -198,6 +200,15 @@ async function createAiMatch(gameType, player, difficulty = 'medium') {
 lobbyNs.on('connection', (socket) => {
   console.log('lobby connected', socket.id);
   const auth = socketUser(socket);
+  if (auth) {
+    // Add/update presence
+    onlineUsers.set(auth.userId, { username: auth.username, inMatch: false, socketId: socket.id });
+    // Send current list to this user
+    const list = Array.from(onlineUsers.entries()).map(([id, v]) => ({ id, username: v.username, inMatch: v.inMatch }));
+    socket.emit('presence.list', list);
+    // Broadcast update
+    socket.broadcast.emit('presence.update', { id: auth.userId, username: auth.username, inMatch: false, online: true });
+  }
 
   socket.on('queue.join', ({ gameType }) => {
     if (!auth) return socket.emit('error', { message: 'unauthorized' });
@@ -255,6 +266,14 @@ lobbyNs.on('connection', (socket) => {
     const t = joinTimeouts.get(socket.id);
     if (t) clearTimeout(t);
     joinTimeouts.delete(socket.id);
+    // Remove presence if matches socket
+    if (auth) {
+      const cur = onlineUsers.get(auth.userId);
+      if (cur && cur.socketId === socket.id) {
+        onlineUsers.delete(auth.userId);
+        socket.broadcast.emit('presence.update', { id: auth.userId, online: false });
+      }
+    }
     console.log('lobby disconnected', socket.id);
   });
 });
@@ -443,6 +462,13 @@ matchNs.use((socket, next) => {
 matchNs.on('connection', (socket) => {
   const { userId } = socket.data.user;
   console.log('match connected', socket.id, userId);
+  // Mark as in match and notify lobby listeners
+  const p = onlineUsers.get(userId);
+  if (p) {
+    p.inMatch = true;
+    onlineUsers.set(userId, p);
+    lobbyNs.emit('presence.update', { id: userId, inMatch: true });
+  }
 
   async function emitStateForAll(matchId, room) {
     const state = matches.get(matchId);
@@ -635,6 +661,12 @@ matchNs.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('match disconnected', socket.id);
+    const p2 = onlineUsers.get(userId);
+    if (p2) {
+      p2.inMatch = false;
+      onlineUsers.set(userId, p2);
+      lobbyNs.emit('presence.update', { id: userId, inMatch: false });
+    }
   });
 
   // Player quits: treat as forfeit and finalize match so leaderboard updates
@@ -716,6 +748,45 @@ matchNs.on('connection', (socket) => {
       rematchRequests.delete(matchId);
     } catch (e) {
       console.error('rematch.request error', e);
+    }
+  });
+});
+
+// ============== Invitations (Lobby) ==============
+// Allow direct challenges between online users
+lobbyNs.on('connection', (socket) => {
+  const auth = socketUser(socket);
+  if (!auth) return;
+
+  socket.on('invite.send', async ({ toUserId, gameType }) => {
+    try {
+      if (!['ttt','rps'].includes(gameType)) return;
+      if (!toUserId || toUserId === auth.userId) return;
+      const target = onlineUsers.get(toUserId);
+      const me = onlineUsers.get(auth.userId);
+      if (!target) return socket.emit('invite.error', { message: 'User offline' });
+      if (target.inMatch) return socket.emit('invite.error', { message: 'User is in a match' });
+      if (me?.inMatch) return socket.emit('invite.error', { message: 'You are in a match' });
+      // deliver invite
+      lobbyNs.to(target.socketId).emit('invite.received', { from: { id: auth.userId, username: auth.username }, gameType });
+      socket.emit('invite.sent', { to: { id: toUserId, username: target.username }, gameType });
+    } catch (e) {
+      console.error('invite.send error', e);
+    }
+  });
+
+  socket.on('invite.accept', async ({ fromUserId, gameType }) => {
+    try {
+      if (!['ttt','rps'].includes(gameType)) return;
+      const a = onlineUsers.get(fromUserId);
+      const b = onlineUsers.get(auth.userId);
+      if (!a || !b) return;
+      if (a.inMatch || b.inMatch) return;
+      // Create human match using lobby namespace sockets
+      const fromSocket = lobbyNs.sockets.get(a.socketId);
+      await createHumanMatch(gameType, { userId: fromUserId, socket: fromSocket }, { userId: auth.userId, socket });
+    } catch (e) {
+      console.error('invite.accept error', e);
     }
   });
 });

@@ -78,12 +78,21 @@ export const lobbyApi = {
       if (s.disconnected) s.connect();
     }
   },
-  quit: (matchId: string, token: string) => {
-    const s = getMatchSocket(token);
+  inviteSend: (toUserId: string, gameType: GameType, token: string) => {
+    const s = getLobbySocket(token);
     if (s.connected) {
-      s.emit('match.quit', { matchId });
+      s.emit('invite.send', { toUserId, gameType });
     } else {
-      s.once('connect', () => s.emit('match.quit', { matchId }));
+      s.once('connect', () => s.emit('invite.send', { toUserId, gameType }));
+      if (s.disconnected) s.connect();
+    }
+  },
+  inviteAccept: (fromUserId: string, gameType: GameType, token: string) => {
+    const s = getLobbySocket(token);
+    if (s.connected) {
+      s.emit('invite.accept', { fromUserId, gameType });
+    } else {
+      s.once('connect', () => s.emit('invite.accept', { fromUserId, gameType }));
       if (s.disconnected) s.connect();
     }
   },
@@ -117,6 +126,15 @@ export const matchApi = {
       if (s.disconnected) s.connect();
     }
     return s;
+  },
+  quit: (matchId: string, token: string) => {
+    const s = getMatchSocket(token);
+    if (s.connected) {
+      s.emit('match.quit', { matchId });
+    } else {
+      s.once('connect', () => s.emit('match.quit', { matchId }));
+      if (s.disconnected) s.connect();
+    }
   },
   moveTtt: (matchId: string, cellIdx: number, token: string) => {
     const s = getMatchSocket(token);
