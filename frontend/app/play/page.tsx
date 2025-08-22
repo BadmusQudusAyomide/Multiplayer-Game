@@ -1,9 +1,29 @@
 import Link from "next/link";
+import { useAuth } from "@/src/store/useAuth";
+import { disconnectAllSockets } from "@/src/lib/socket";
 
 export default function PlayIndexPage() {
+  const token = useAuth((s) => s.token);
+  const setToken = useAuth((s) => s.setToken);
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-12">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Top-right Auth Header */}
+        <div className="flex items-center justify-end py-4">
+          {!token ? (
+            <div className="flex items-center gap-2">
+              <Link href="/login" className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 bg-white hover:bg-slate-50">Login</Link>
+              <Link href="/signup" className="px-3 py-1.5 text-sm rounded-lg bg-slate-900 text-white hover:bg-black">Sign up</Link>
+            </div>
+          ) : (
+            <button
+              onClick={() => { setToken(null); disconnectAllSockets(); try { localStorage.removeItem('lastMatchId'); } catch {} }}
+              className="px-3 py-1.5 text-sm rounded-lg border border-red-300 text-red-700 bg-white hover:bg-red-50"
+            >
+              Logout
+            </button>
+          )}
+        </div>
         {/* Header Section */}
         <div className="text-center mb-16">
           <div className="inline-flex items-center justify-center w-20 h-20 bg-white rounded-2xl shadow-lg mb-6">
