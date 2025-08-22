@@ -2,6 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 import NavBar from './components/NavBar';
 
+
 export const metadata: Metadata = {
   title: 'Multiplayer Games',
   description: 'Play TTT and RPS vs players or AI',

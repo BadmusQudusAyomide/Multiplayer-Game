@@ -1,25 +1,40 @@
 "use client";
 import { io, Socket } from 'socket.io-client';
 
+function normalizeProtocol(url: string) {
+  try {
+    // If the app is served over HTTPS but the URL is HTTP, upgrade to HTTPS to avoid mixed content
+    if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && url.startsWith('http://')) {
+      return url.replace(/^http:\/\//, 'https://');
+    }
+  } catch {}
+  return url;
+}
+
 function socketBaseUrl() {
   const a = process.env.NEXT_PUBLIC_SOCKET_URL;
   const b = process.env.NEXT_PUBLIC_API_BASE_URL;
-  return (a || b || 'http://localhost:4000') as string;
+  const raw = (a || b || 'http://localhost:4000') as string;
+  return normalizeProtocol(raw);
 }
 
 let lobbySocket: Socket | null = null;
 let chatSocket: Socket | null = null;
 let matchSocket: Socket | null = null;
 
+const FORCE_POLLING = process.env.NEXT_PUBLIC_FORCE_POLLING === '1' || process.env.NEXT_PUBLIC_FORCE_POLLING === 'true';
+
 export function getLobbySocket(token?: string) {
   if (!lobbySocket) {
-    lobbySocket = io(socketBaseUrl() + '/lobby', {
+    const base = socketBaseUrl();
+    const transports = FORCE_POLLING ? ['polling'] : ['websocket', 'polling'];
+    lobbySocket = io(base + '/lobby', {
       // We pass JWT via Socket.IO auth payload; cookies are not needed
       withCredentials: false,
       auth: token ? { token } : undefined,
       autoConnect: !!token,
       // Prefer WebSocket; allow polling as fallback only if WS is blocked
-      transports: ['websocket', 'polling'],
+      transports,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 500,
@@ -27,7 +42,11 @@ export function getLobbySocket(token?: string) {
       timeout: 20000,
     });
     lobbySocket.on('connect_error', (err) => {
-      console.error('lobby socket connect_error', err?.message || err);
+      console.error('lobby socket connect_error', err?.message || err, {
+        base,
+        ns: '/lobby',
+        transports,
+      });
     });
   } else if (token) {
     // If token provided later, update auth and reconnect if needed
@@ -39,11 +58,13 @@ export function getLobbySocket(token?: string) {
 
 export function getChatSocket(token?: string) {
   if (!chatSocket) {
-    chatSocket = io(socketBaseUrl() + '/chat', {
+    const base = socketBaseUrl();
+    const transports = FORCE_POLLING ? ['polling'] : ['polling', 'websocket'];
+    chatSocket = io(base + '/chat', {
       withCredentials: true,
       auth: token ? { token } : undefined,
       autoConnect: !!token,
-      transports: ['polling', 'websocket'],
+      transports,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 500,
@@ -51,7 +72,11 @@ export function getChatSocket(token?: string) {
       timeout: 10000,
     });
     chatSocket.on('connect_error', (err) => {
-      console.error('chat socket connect_error', err?.message || err);
+      console.error('chat socket connect_error', err?.message || err, {
+        base,
+        ns: '/chat',
+        transports,
+      });
     });
   } else if (token) {
     chatSocket.auth = { token } as any;
@@ -112,11 +137,13 @@ export const lobbyApi = {
 
 export function getMatchSocket(token?: string) {
   if (!matchSocket) {
-    matchSocket = io(socketBaseUrl() + '/match', {
+    const base = socketBaseUrl();
+    const transports = FORCE_POLLING ? ['polling'] : ['websocket', 'polling'];
+    matchSocket = io(base + '/match', {
       withCredentials: false,
       auth: token ? { token } : undefined,
       autoConnect: !!token,
-      transports: ['websocket', 'polling'],
+      transports,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 500,
@@ -124,7 +151,11 @@ export function getMatchSocket(token?: string) {
       timeout: 10000,
     });
     matchSocket.on('connect_error', (err) => {
-      console.error('match socket connect_error', err?.message || err);
+      console.error('match socket connect_error', err?.message || err, {
+        base,
+        ns: '/match',
+        transports,
+      });
     });
   } else if (token) {
     matchSocket.auth = { token } as any;
