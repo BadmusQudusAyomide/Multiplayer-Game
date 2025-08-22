@@ -338,7 +338,7 @@ export default function Home() {
 
                 <div className="grid md:grid-cols-2 gap-3 sm:gap-4">
                   <Link
-                    href={`/play/${game}?mode=player`}
+                    href={game === 'ttt' ? '/play/ttt?mode=player' : '/play/rps?mode=player'}
                     className="group relative p-4 sm:p-6 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 transform hover:scale-[1.02] shadow-xl hover:shadow-blue-500/25 flex items-center justify-between"
                     onClick={() => setModeOpen(false)}
                     ref={firstActionRef}
@@ -355,7 +355,7 @@ export default function Home() {
                   </Link>
 
                   <Link
-                    href={`/play/${game}?mode=ai`}
+                    href={game === 'ttt' ? '/play/ttt?mode=ai' : '/play/rps?mode=ai'}
                     className="group relative p-4 sm:p-6 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold hover:from-emerald-600 hover:to-teal-700 transition-all duration-300 transform hover:scale-[1.02] shadow-xl hover:shadow-emerald-500/25 flex items-center justify-between"
                     onClick={() => setModeOpen(false)}
                   >
