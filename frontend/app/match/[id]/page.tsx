@@ -35,6 +35,10 @@ export default function MatchPage() {
   const { scoreboard, incWin, incLoss, incDraw, reset, setId: setArenaId, currentRound, maxRounds, incRound, resetRounds } = useMatch();
 
   const [state, setState] = useState<any>(null);
+  // Pre-match lobby state until both players click Start
+  const [lobbyWait, setLobbyWait] = useState<{ playersInfo: any[]; ready: string[] } | null>(null);
+  // Track if I clicked Start to disable button and change label
+  const [iClickedReady, setIClickedReady] = useState(false);
   // Track last round result for lightweight feedback; no blocking modal
   const [lastResult, setLastResult] = useState<any>(null);
   const [roundOver, setRoundOver] = useState(false);
@@ -44,6 +48,13 @@ export default function MatchPage() {
   const [isConnected, setIsConnected] = useState(false);
   const [animateMove, setAnimateMove] = useState<number | null>(null);
   const [nextRoundStatus, setNextRoundStatus] = useState<'idle' | 'requesting' | 'pending'>('idle');
+  // Opponent disconnect notice
+  const [opponentLeft, setOpponentLeft] = useState<{ userId: string; ts: number } | null>(null);
+  const [oppRejoinSeconds, setOppRejoinSeconds] = useState<number | null>(null);
+  const GRACE_MS = useMemo(() => {
+    const v = Number(process.env.NEXT_PUBLIC_MATCH_REJOIN_GRACE_MS || '15000');
+    return Number.isFinite(v) && v > 0 ? v : 15000;
+  }, []);
 
   const seat = state?.seat as 0 | 1 | undefined;
   // Refs to avoid stale state inside socket handlers
@@ -66,16 +77,59 @@ export default function MatchPage() {
     setIsConnected(false);
 
     const s = matchApi.join(id, token);
+    // Track actual transport connection state for better UX
+    const onConnected = () => {
+      setIsConnected(true);
+      setConnMsg('Connected. Joining match...');
+      // Ensure join was received (redundant but safe)
+      s.emit('match.join', { matchId: id });
+    };
+    const onDisconnected = () => {
+      setIsConnected(false);
+      setConnMsg('Disconnected. Reconnecting...');
+    };
+    s.on('connect', onConnected);
+    s.on('disconnect', onDisconnected);
+
+    // Fallback: if no lobby.wait/state within 4s after connect, re-send join
+    let retryTimer: any = null;
+    const scheduleRetry = () => {
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => {
+        try {
+          if (s.connected) {
+            s.emit('match.join', { matchId: id });
+          } else if (s.disconnected) {
+            s.connect();
+          }
+        } catch {}
+      }, 4000);
+    };
+    // Start initial retry window
+    scheduleRetry();
+
+    try { localStorage.setItem('lastMatchId', id); } catch {}
     setArenaId(id);
     resetRounds();
 
+    const onLobbyWait = (payload: any) => {
+      // payload: { matchId, playersInfo, ready }
+      setLobbyWait({ playersInfo: payload?.playersInfo || [], ready: payload?.ready || [] });
+      setConnMsg('Matched! Waiting for players to press Start...');
+      setIsConnected(true);
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    };
+
     const onState = (payload: any) => {
       setState(payload);
+      setLobbyWait(null);
+      setIClickedReady(false);
       setConnMsg('');
       setIsConnected(true);
       setRoundOver(false);
       // clear last result when a new state's round begins
       setLastResult(null);
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     };
 
     const onEnd = (payload: any) => {
@@ -83,6 +137,17 @@ export default function MatchPage() {
       setLastResult(payload);
       // Auto dismiss round result after 3 seconds
       setTimeout(() => setLastResult(null), 3000);
+      // If opponent quit, auto-exit after a short delay
+      if (payload?.result === 'forfeit') {
+        setConnMsg('Opponent left. Ending match...');
+        setTimeout(() => {
+          try { localStorage.removeItem('lastMatchId'); } catch {}
+          disconnectMatchSocket();
+          reset();
+          router.push('/');
+        }, 1500);
+        return;
+      }
       try {
         // Determine W/L/D based on latest state and payload, using refs to avoid stale closures
         const st = stateRef.current;
@@ -132,8 +197,21 @@ export default function MatchPage() {
       setIsConnected(false);
     };
 
+    const onOpponentLeft = (payload: any) => {
+      setOpponentLeft(payload);
+      setConnMsg('Opponent disconnected. Waiting for rejoin...');
+    };
+
+    const onOpponentRejoined = () => {
+      setOpponentLeft(null);
+      setConnMsg('');
+    };
+
+    s.on('lobby.wait', onLobbyWait);
     s.on('state.update', onState);
     s.on('match.end', onEnd);
+    s.on('opponent.left', onOpponentLeft);
+    s.on('opponent.rejoined', onOpponentRejoined);
     s.on('error', onErr);
     s.on('connect_error', onConnectErr as any);
     s.on('rematch.pending', (p: any) => {
@@ -153,14 +231,34 @@ export default function MatchPage() {
 
     return () => {
       const ms = getMatchSocket();
+      ms?.off('lobby.wait', onLobbyWait);
       ms?.off('state.update', onState);
       ms?.off('match.end', onEnd);
       ms?.off('error', onErr);
       ms?.off('connect_error', onConnectErr as any);
       ms?.off('rematch.pending');
       ms?.off('rematch.created');
+      ms?.off('opponent.left', onOpponentLeft);
+      ms?.off('opponent.rejoined', onOpponentRejoined);
+      ms?.off('connect', onConnected);
+      ms?.off('disconnect', onDisconnected);
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [id, token, router]);
+
+  // Drive a visible countdown when opponentLeft is set
+  useEffect(() => {
+    if (!opponentLeft) { setOppRejoinSeconds(null); return; }
+    const startedAt = Date.now();
+    const tick = () => {
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, Math.ceil((GRACE_MS - elapsed) / 1000));
+      setOppRejoinSeconds(remaining);
+    };
+    tick();
+    const iv = setInterval(tick, 500);
+    return () => clearInterval(iv);
+  }, [opponentLeft, GRACE_MS]);
 
   const submitTtt = (idx: number) => {
     if (!token || roundOver || state?.gameType !== 'ttt') return;
@@ -370,7 +468,7 @@ export default function MatchPage() {
                   </div>
                 )}
                 <button
-                  onClick={() => { if (token) { matchApi.quit(id, token); } disconnectMatchSocket(); reset(); router.push('/online'); }}
+                  onClick={() => { if (token) { matchApi.quit(id, token); } try { localStorage.removeItem('lastMatchId'); } catch {} disconnectMatchSocket(); reset(); router.push('/online'); }}
                   className="flex items-center gap-2 px-3 py-1 bg-white/10 rounded-lg text-sm text-purple-200 hover:bg-white/20 transition-colors"
                   title="See online players"
                 >
@@ -391,7 +489,7 @@ export default function MatchPage() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => { if (token) { matchApi.quit(id, token); } disconnectMatchSocket(); reset(); router.push('/'); }}
+                  onClick={() => { if (token) { matchApi.quit(id, token); } try { localStorage.removeItem('lastMatchId'); } catch {} disconnectMatchSocket(); reset(); router.push('/'); }}
                   className="flex-1 py-2 px-4 bg-gradient-to-r from-red-500 to-pink-600 text-white font-semibold rounded-xl hover:from-red-600 hover:to-pink-700"
                 >
                   Exit
@@ -422,7 +520,7 @@ export default function MatchPage() {
           </div>
         </div>
 
-        {/* Connection Status */}
+        {/* Connection Status or Lobby Wait */}
         {!state && connMsg && (
           <div className="text-center py-12">
             <div className="inline-flex items-center gap-3 px-6 py-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20">
@@ -432,10 +530,50 @@ export default function MatchPage() {
           </div>
         )}
 
+        {/* Pre-Match Lobby: show players and Start button */}
+        {!state && lobbyWait && (
+          <div className="mb-10 flex flex-col items-center gap-4">
+            <div className="flex items-center gap-6 bg-white/5 rounded-2xl border border-white/10 px-5 py-4">
+              {lobbyWait.playersInfo?.map((p: any) => (
+                <div key={p.id} className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${lobbyWait.ready?.includes(p.id) ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-200' : 'bg-white/10 border-white/20 text-purple-100'}`}>
+                  {p.id === 'AI' ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                  <span className="font-semibold">{p.username || p.id}</span>
+                  <span className="text-xs opacity-80">{lobbyWait.ready?.includes(p.id) ? 'Ready' : 'Not ready'}</span>
+                </div>
+              ))}
+            </div>
+            {(() => {
+              const waitingFor = lobbyWait.playersInfo?.find((p: any) => !lobbyWait.ready?.includes(p.id));
+              const waitingName = waitingFor?.username || (waitingFor?.id === 'AI' ? 'AI' : 'opponent');
+              return (
+                <button
+                  onClick={() => { if (token) { setIClickedReady(true); matchApi.ready(id, token); } }}
+                  disabled={iClickedReady}
+                  className={`px-6 py-3 rounded-2xl text-white font-semibold transition-all duration-300 transform border ${iClickedReady ? 'bg-gray-500/40 border-white/10 cursor-not-allowed' : 'hover:scale-105 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 border-white/20'}`}
+                >
+                  {iClickedReady ? `Waiting for ${waitingName}...` : 'Start'}
+                </button>
+              );
+            })()}
+          </div>
+        )}
+
         {/* Player Info */}
         {state && (
           <div className="mb-12 flex flex-wrap justify-center">
             {getPlayerInfo()}
+          </div>
+        )}
+
+        {/* Opponent Left Banner */}
+        {opponentLeft && !roundOver && (
+          <div className="mb-6 flex justify-center">
+            <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-red-500/20 text-red-100 border border-red-400/40">
+              <RefreshCw className="w-5 h-5 animate-spin" />
+              <span>
+                Opponent disconnected. Waiting for rejoin{typeof oppRejoinSeconds === 'number' ? ` (${oppRejoinSeconds}s)` : '...'}
+              </span>
+            </div>
           </div>
         )}
 
@@ -534,7 +672,7 @@ export default function MatchPage() {
               <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
             </button>
             <button
-              onClick={() => { if (token) { matchApi.quit(id, token); } disconnectMatchSocket(); reset(); router.push('/'); }}
+              onClick={() => { if (token) { matchApi.quit(id, token); } try { localStorage.removeItem('lastMatchId'); } catch {} disconnectMatchSocket(); reset(); router.push('/'); }}
               className="p-3 sm:p-4 bg-white/10 backdrop-blur-md rounded-full border border-white/20 text-white hover:bg-white/20 transition-all duration-300 transform hover:scale-105 sm:hover:scale-110 shadow-2xl"
               title="Home"
             >
@@ -547,7 +685,13 @@ export default function MatchPage() {
         {lastResult && (
           <div className="fixed inset-x-0 bottom-24 flex justify-center z-40">
             <div className="px-4 py-2 bg-white/10 border border-white/20 rounded-full text-purple-200 backdrop-blur-md">
-              <span className="font-semibold">Round Result:</span> {JSON.stringify(lastResult)}
+              {lastResult?.result === 'forfeit' ? (
+                <span className="font-semibold">Opponent left. Match ended.</span>
+              ) : (
+                <>
+                  <span className="font-semibold">Round Result:</span> {JSON.stringify(lastResult)}
+                </>
+              )}
             </div>
           </div>
         )}

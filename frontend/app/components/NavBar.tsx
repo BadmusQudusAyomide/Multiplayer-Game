@@ -7,6 +7,7 @@ import type { Route } from "next";
 const links: { href: Route; label: string }[] = [
   { href: "/online", label: "Online" },
   { href: "/leaderboard", label: "Leaderboard" },
+  { href: "/profile", label: "Profile" },
 ];
 
 export default function NavBar() {

@@ -15,19 +15,38 @@ export default function OnlinePage() {
   const token = useAuth((s) => s.token);
   const router = useRouter();
   const [online, setOnline] = useState<PresenceItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
   const [selfId, setSelfId] = useState<string | null>(null);
   const [lastInvite, setLastInvite] = useState<Invite | null>(null);
   const [inviteStatus, setInviteStatus] = useState<InviteStatus>(InviteStatus.Idle);
+  const [lastMatchId, setLastMatchId] = useState<string | null>(null);
+  const [connStatus, setConnStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
 
   useEffect(() => {
     if (!token) { router.push('/login'); return; }
     // Connect to lobby
     const s = getLobbySocket(token);
+    // Decode jwt to get current user id (sub)
+    let myId: string | null = null;
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      myId = payload?.sub || null;
+    } catch {}
+    setSelfId(myId);
 
     const onPresenceList = (list: PresenceItem[]) => {
-      setOnline(list);
+      console.log('presence.list received', list);
+      // Exclude self from initial list
+      const filtered = myId ? list.filter((u) => u.id !== myId) : list;
+      setOnline(filtered);
+      setLoading(false);
     };
     const onPresenceUpdate = (p: Partial<PresenceItem> & { id: string; online?: boolean }) => {
+      // Ignore self updates
+      if (myId && p.id === myId) return;
+      console.log('presence.update', p);
+      // Any update means the channel is alive; stop showing loader
+      setLoading(false);
       setOnline((prev) => {
         const idx = prev.findIndex((x) => x.id === p.id);
         // remove if went offline
@@ -76,9 +95,20 @@ export default function OnlinePage() {
     s.on('invite.sent', onInviteSent);
     s.on('invite.error', onInviteError);
     s.on('match.found', onMatchFound);
+    // Connection status listeners
+    const onConnect = () => { setConnStatus('connected'); console.log('lobby connected'); };
+    const onConnectError = (e: any) => { setConnStatus('error'); console.error('lobby connect_error', e?.message || e); };
+    const onDisconnect = (r: any) => { setConnStatus('connecting'); console.warn('lobby disconnected', r); };
+    s.on('connect', onConnect);
+    s.on('connect_error', onConnectError);
+    s.on('disconnect', onDisconnect);
     if (s.disconnected) s.connect();
 
+    // Failsafe: stop loading after a short timeout even if list hasn't arrived (network slowness)
+    const loadingTimeout = setTimeout(() => setLoading(false), 3000);
+
     return () => {
+      clearTimeout(loadingTimeout);
       const ls = getLobbySocket();
       ls?.off('presence.list', onPresenceList);
       ls?.off('presence.update', onPresenceUpdate);
@@ -86,8 +116,21 @@ export default function OnlinePage() {
       ls?.off('invite.sent', onInviteSent);
       ls?.off('invite.error', onInviteError);
       ls?.off('match.found', onMatchFound);
+      ls?.off('connect', onConnect);
+      ls?.off('connect_error', onConnectError);
+      ls?.off('disconnect', onDisconnect);
     };
   }, [token, router]);
+
+  // Load lastMatchId
+  useEffect(() => {
+    try { setLastMatchId(localStorage.getItem('lastMatchId')); } catch {}
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'lastMatchId') setLastMatchId(e.newValue);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   const invite = (toUserId: string, gameType: GameType) => {
     if (!token) return;
@@ -115,13 +158,26 @@ export default function OnlinePage() {
             <div>
               <h1 className="text-2xl lg:text-3xl font-bold bg-gradient-to-r from-white to-purple-200 bg-clip-text text-transparent">Online Players</h1>
               <div className="flex items-center gap-2 text-sm text-gray-300 mt-1">
-                <Wifi className="w-4 h-4 text-green-400" /> Connected
+                {connStatus === 'connected' ? (
+                  <><Wifi className="w-4 h-4 text-green-400" /> Connected</>
+                ) : connStatus === 'connecting' ? (
+                  <><Wifi className="w-4 h-4 text-yellow-400 animate-pulse" /> Connecting…</>
+                ) : (
+                  <><Wifi className="w-4 h-4 text-rose-400" /> Connection error</>
+                )}
               </div>
             </div>
           </div>
-          <button onClick={() => router.push('/')} className="px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20 flex items-center gap-2">
-            <Home className="w-4 h-4" /> Home
-          </button>
+          <div className="flex items-center gap-2">
+            {lastMatchId && (
+              <button onClick={() => router.push(`/match/${lastMatchId}`)} className="px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold hover:from-emerald-600 hover:to-teal-700">
+                Resume match
+              </button>
+            )}
+            <button onClick={() => router.push('/')} className="px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20 flex items-center gap-2">
+              <Home className="w-4 h-4" /> Home
+            </button>
+          </div>
         </div>
 
         {/* Invite toast */}
@@ -144,28 +200,55 @@ export default function OnlinePage() {
           </div>
         )}
 
-        {/* List */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((u) => (
-            <div key={u.id} className="p-4 bg-white/10 rounded-2xl border border-white/20 text-white flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${u.inMatch ? 'bg-yellow-500/20' : 'bg-green-500/20'}`}>{u.inMatch ? <UserX className="w-5 h-5 text-yellow-300"/> : <UserCheck className="w-5 h-5 text-emerald-300"/>}</div>
-                <div>
-                  <div className="font-semibold">{u.username}</div>
-                  <div className="text-sm text-gray-300">{u.inMatch ? 'In a match' : 'Available'}</div>
+        {/* List or Loading/Empty states */}
+        {loading && filtered.length === 0 ? (
+          <>
+            <div className="mb-4 p-3 rounded-xl bg-white/10 border border-white/20 text-white text-sm">Fetching players...</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="p-4 rounded-2xl bg-white/5 border border-white/10 animate-pulse">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-white/10" />
+                      <div>
+                        <div className="h-3 w-28 bg-white/10 rounded mb-2" />
+                        <div className="h-2 w-20 bg-white/10 rounded" />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="h-9 w-16 bg-white/10 rounded-xl" />
+                      <div className="h-9 w-16 bg-white/10 rounded-xl" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : filtered.length === 0 ? (
+          <div className="p-6 bg-white/10 border border-white/20 rounded-2xl text-center text-white">No players online yet. Invite a friend or wait a moment.</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filtered.map((u) => (
+              <div key={u.id} className="p-4 bg-white/10 rounded-2xl border border-white/20 text-white flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${u.inMatch ? 'bg-yellow-500/20' : 'bg-green-500/20'}`}>{u.inMatch ? <UserX className="w-5 h-5 text-yellow-300"/> : <UserCheck className="w-5 h-5 text-emerald-300"/>}</div>
+                  <div>
+                    <div className="font-semibold">{u.username}</div>
+                    <div className="text-sm text-gray-300">{u.inMatch ? 'In a match' : 'Available'}</div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button disabled={!!u.inMatch} onClick={() => invite(u.id, 'ttt')} className={`px-3 py-2 rounded-xl border ${u.inMatch ? 'bg-gray-500/20 border-white/10 text-gray-300 cursor-not-allowed' : 'bg-white/10 border-white/20 hover:bg-white/20'}`}>
+                    <Swords className="w-4 h-4 inline mr-1"/> TTT
+                  </button>
+                  <button disabled={!!u.inMatch} onClick={() => invite(u.id, 'rps')} className={`px-3 py-2 rounded-xl border ${u.inMatch ? 'bg-gray-500/20 border-white/10 text-gray-300 cursor-not-allowed' : 'bg-white/10 border-white/20 hover:bg-white/20'}`}>
+                    <Gamepad2 className="w-4 h-4 inline mr-1"/> RPS
+                  </button>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button disabled={!!u.inMatch} onClick={() => invite(u.id, 'ttt')} className={`px-3 py-2 rounded-xl border ${u.inMatch ? 'bg-gray-500/20 border-white/10 text-gray-300 cursor-not-allowed' : 'bg-white/10 border-white/20 hover:bg-white/20'}`}>
-                  <Swords className="w-4 h-4 inline mr-1"/> TTT
-                </button>
-                <button disabled={!!u.inMatch} onClick={() => invite(u.id, 'rps')} className={`px-3 py-2 rounded-xl border ${u.inMatch ? 'bg-gray-500/20 border-white/10 text-gray-300 cursor-not-allowed' : 'bg-white/10 border-white/20 hover:bg-white/20'}`}>
-                  <Gamepad2 className="w-4 h-4 inline mr-1"/> RPS
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -14,10 +14,17 @@ let matchSocket: Socket | null = null;
 export function getLobbySocket(token?: string) {
   if (!lobbySocket) {
     lobbySocket = io(socketBaseUrl() + '/lobby', {
-      withCredentials: true,
+      // We pass JWT via Socket.IO auth payload; cookies are not needed
+      withCredentials: false,
       auth: token ? { token } : undefined,
       autoConnect: !!token,
+      // Prefer WebSocket; allow polling as fallback only if WS is blocked
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
     });
     lobbySocket.on('connect_error', (err) => {
       console.error('lobby socket connect_error', err?.message || err);
@@ -36,7 +43,12 @@ export function getChatSocket(token?: string) {
       withCredentials: true,
       auth: token ? { token } : undefined,
       autoConnect: !!token,
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 5000,
+      timeout: 10000,
     });
     chatSocket.on('connect_error', (err) => {
       console.error('chat socket connect_error', err?.message || err);
@@ -101,10 +113,15 @@ export const lobbyApi = {
 export function getMatchSocket(token?: string) {
   if (!matchSocket) {
     matchSocket = io(socketBaseUrl() + '/match', {
-      withCredentials: true,
+      withCredentials: false,
       auth: token ? { token } : undefined,
       autoConnect: !!token,
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 5000,
+      timeout: 10000,
     });
     matchSocket.on('connect_error', (err) => {
       console.error('match socket connect_error', err?.message || err);
@@ -126,6 +143,15 @@ export const matchApi = {
       if (s.disconnected) s.connect();
     }
     return s;
+  },
+  ready: (matchId: string, token: string) => {
+    const s = getMatchSocket(token);
+    if (s.connected) {
+      s.emit('player.ready', { matchId });
+    } else {
+      s.once('connect', () => s.emit('player.ready', { matchId }));
+      if (s.disconnected) s.connect();
+    }
   },
   quit: (matchId: string, token: string) => {
     const s = getMatchSocket(token);

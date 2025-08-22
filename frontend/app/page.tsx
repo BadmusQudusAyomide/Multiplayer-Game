@@ -1,6 +1,7 @@
 "use client";
 import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/src/store/useAuth';
 import { disconnectAllSockets } from '@/src/lib/socket';
 import {
@@ -21,18 +22,62 @@ import {
 } from 'lucide-react';
 
 export default function Home() {
+  const router = useRouter();
   const [game, setGame] = useState<'ttt' | 'rps' | ''>('');
   const [modeOpen, setModeOpen] = useState(false);
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const firstActionRef = useRef<HTMLAnchorElement | null>(null);
   const [stats, setStats] = useState<{ activePlayers: number; totalWins: number; avgRating: number }>({ activePlayers: 0, totalWins: 0, avgRating: 1000 });
+  const [lastMatchId, setLastMatchId] = useState<string | null>(null);
 
   const token = useAuth((s) => s.token);
   const setToken = useAuth((s) => s.setToken);
 
+  // Lightweight, lag-free homepage
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+      <div className="text-center px-6 py-12">
+        <h1 className="text-4xl sm:text-5xl font-black bg-gradient-to-r from-white via-purple-200 to-pink-200 bg-clip-text text-transparent">
+          Multiplayer Fun, Instantly
+        </h1>
+        <p className="mt-3 text-purple-200 max-w-xl mx-auto">
+          Jump right in. No clutter, no lag. Play with friends or AI.
+        </p>
+        <div className="mt-6">
+          <Link
+            href="/play"
+            className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-emerald-600 text-white text-lg font-bold hover:bg-emerald-700 transition-colors shadow-lg"
+          >
+            Play now
+          </Link>
+        </div>
+        {!token && (
+          <div className="mt-6 flex items-center justify-center gap-3">
+            <Link href="/login" className="rounded-xl border border-white/20 px-4 py-2 text-white hover:bg-white/10">Login</Link>
+            <Link href="/signup" className="rounded-xl bg-white/10 border border-white/20 px-4 py-2 text-white hover:bg-white/15">Sign up</Link>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   useEffect(() => {
     setIsVisible(true);
+  }, []);
+
+  // Load lastMatchId from localStorage and listen for changes
+  useEffect(() => {
+    try {
+      setLastMatchId(localStorage.getItem('lastMatchId'));
+    } catch {}
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'lastMatchId') {
+        setLastMatchId(e.newValue);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // Fetch real-time stats for hero section
@@ -155,12 +200,22 @@ export default function Home() {
                 </Link>
               </>
             ) : (
-              <button
-                onClick={() => { setToken(null); disconnectAllSockets(); }}
-                className="px-3 py-2 sm:px-4 sm:py-2 text-sm sm:text-base rounded-xl border border-red-400/30 text-white hover:bg-red-500/20 transition-all backdrop-blur-sm whitespace-nowrap"
-              >
-                Logout
-              </button>
+              <div className="flex items-center gap-2">
+                {lastMatchId && (
+                  <button
+                    onClick={() => router.push(`/match/${lastMatchId}`)}
+                    className="px-3 py-2 sm:px-4 sm:py-2 text-sm sm:text-base rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold hover:from-emerald-600 hover:to-teal-700 transition-all whitespace-nowrap"
+                  >
+                    Resume match
+                  </button>
+                )}
+                <button
+                  onClick={() => { setToken(null); disconnectAllSockets(); try { localStorage.removeItem('lastMatchId'); } catch {} }}
+                  className="px-3 py-2 sm:px-4 sm:py-2 text-sm sm:text-base rounded-xl border border-red-400/30 text-white hover:bg-red-500/20 transition-all backdrop-blur-sm whitespace-nowrap"
+                >
+                  Logout
+                </button>
+              </div>
             )}
           </div>
         </header>

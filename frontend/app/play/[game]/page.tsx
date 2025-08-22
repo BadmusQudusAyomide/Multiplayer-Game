@@ -36,7 +36,7 @@ export default function PlayGame() {
       setStatus('Starting AI match...');
       lobbyApi.acceptAi(gameType, token, difficulty);
     } else {
-      setStatus('Finding a player... If none within 12s, we will suggest AI.');
+      setStatus('Finding a player... If none within 30s, we will suggest AI.');
       lobbyApi.joinQueue(gameType, token);
     }
 
@@ -95,6 +95,24 @@ export default function PlayGame() {
             <div className="flex gap-2">
               <Link href="/login" className="rounded border border-white/20 px-3 py-2 hover:bg-white/10 transition-colors">Login</Link>
               <Link href="/signup" className="rounded bg-emerald-600 px-3 py-2 text-white hover:bg-emerald-700 transition-colors">Sign up</Link>
+            </div>
+          )}
+
+          {/* Entry choices when no mode selected */}
+          {!mode && (
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <Link href={`/play/${gameType}?mode=player`} className="rounded-xl bg-white/10 border border-white/20 p-4 hover:bg-white/15 transition-colors block text-center">
+                <div className="text-lg font-semibold">Play Online</div>
+                <div className="text-sm text-purple-200/80">Match with anyone</div>
+              </Link>
+              <Link href={`/play/${gameType}?mode=ai`} className="rounded-xl bg-white/10 border border-white/20 p-4 hover:bg-white/15 transition-colors block text-center">
+                <div className="text-lg font-semibold">Play AI</div>
+                <div className="text-sm text-purple-200/80">Practice vs computer</div>
+              </Link>
+              <Link href={`/play/${gameType}/code`} className="rounded-xl bg-white/10 border border-white/20 p-4 hover:bg-white/15 transition-colors block text-center">
+                <div className="text-lg font-semibold">Play with Code</div>
+                <div className="text-sm text-purple-200/80">Share/join via code</div>
+              </Link>
             </div>
           )}
 

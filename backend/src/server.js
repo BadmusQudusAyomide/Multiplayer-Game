@@ -14,7 +14,7 @@ import { Match } from './models/Match.js';
 const PORT = process.env.PORT || 4000;
 const CORS_ORIGIN = (process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
-  : ['http://localhost:3000']
+  : ['http://localhost:3000', 'http://127.0.0.1:3000']
 );
 const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET || 'change_me_access';
@@ -34,6 +34,104 @@ app.use(cookieParser());
 // Health route
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'backend', time: new Date().toISOString() });
+});
+
+// Simple JWT auth middleware for HTTP routes
+function httpAuth(req, res, next) {
+  try {
+    const h = req.headers['authorization'] || '';
+    const m = /^Bearer\s+(.+)$/i.exec(h);
+    const token = m && m[1];
+    if (!token) return res.status(401).json({ message: 'unauthorized' });
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = { id: decoded.sub, username: decoded.username };
+    next();
+  } catch (e) {
+    return res.status(401).json({ message: 'unauthorized' });
+  }
+}
+
+// Profile route: totals and recent matches
+app.get('/me/profile', httpAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userDoc = await User.findById(userId).lean();
+    if (!userDoc) return res.status(404).json({ message: 'user not found' });
+
+    const statsTTT = userDoc.statsTTT || {};
+    const statsRPS = userDoc.statsRPS || {};
+    const totals = {
+      wins: (statsTTT.wins || 0) + (statsRPS.wins || 0),
+      losses: (statsTTT.losses || 0) + (statsRPS.losses || 0),
+      draws: (statsTTT.draws || 0) + (statsRPS.draws || 0),
+      ttt: { wins: statsTTT.wins || 0, losses: statsTTT.losses || 0, draws: statsTTT.draws || 0, elo: statsTTT.elo ?? 1000 },
+      rps: { wins: statsRPS.wins || 0, losses: statsRPS.losses || 0, draws: statsRPS.draws || 0, elo: statsRPS.elo ?? 1000 },
+    };
+
+    // recent matches (limit 20)
+    const recent = await Match.find({ players: userId }).sort({ createdAt: -1 }).limit(20).lean();
+    // collect opponent ids
+    const oppIds = Array.from(new Set(recent.flatMap(m => (m.players || []).map(p => p.toString()).filter(p => p !== userId))));
+    const oppDocs = await User.find({ _id: { $in: oppIds } }, { username: 1 }).lean();
+    const oppMap = new Map(oppDocs.map(d => [d._id.toString(), d.username]));
+
+    const matches = recent.map((m) => {
+      const oppId = (m.players || []).map(p => p.toString()).find(p => p !== userId) || null;
+      return {
+        id: m._id.toString(),
+        gameType: m.gameType,
+        playedVs: m.playedVs,
+        winnerUserId: m.winnerUserId ? m.winnerUserId.toString() : null,
+        result: m.status === 'finished' ? (m.winnerUserId ? (m.winnerUserId.toString() === userId ? 'win' : (m.winnerUserId.toString() === 'AI' ? (m.playedVs === 'ai' ? 'loss' : 'loss') : 'loss')) : 'draw') : 'active',
+        opponent: oppId ? { id: oppId, username: oppMap.get(oppId) || 'Opponent' } : (m.playedVs === 'ai' ? { id: 'AI', username: 'AI' } : null),
+        createdAt: m.createdAt || null,
+      };
+    });
+
+    res.json({
+      user: { id: userDoc._id.toString(), username: userDoc.username, email: userDoc.email },
+      totals,
+      matches,
+    });
+  } catch (e) {
+    console.error('profile error', e);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Update profile details (username/email)
+app.put('/me/profile', httpAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { username, email } = req.body || {};
+    if (!username && !email) return res.status(400).json({ message: 'No fields to update' });
+
+    // Ensure username/email uniqueness if provided
+    if (username) {
+      const exists = await User.findOne({ _id: { $ne: userId }, username }).lean();
+      if (exists) return res.status(409).json({ message: 'Username already taken' });
+    }
+    if (email) {
+      const exists = await User.findOne({ _id: { $ne: userId }, email }).lean();
+      if (exists) return res.status(409).json({ message: 'Email already in use' });
+    }
+
+    const update = {};
+    if (username) update.username = username;
+    if (email) update.email = email;
+
+    const updated = await User.findByIdAndUpdate(
+      userId,
+      { $set: update },
+      { new: true, projection: { username: 1, email: 1 } }
+    ).lean();
+
+    if (!updated) return res.status(404).json({ message: 'user not found' });
+    return res.json({ user: { id: updated._id.toString(), username: updated.username, email: updated.email } });
+  } catch (e) {
+    console.error('profile update error', e);
+    return res.status(500).json({ message: 'Server error' });
+  }
 });
 
 // Global stats endpoint for homepage hero
@@ -161,7 +259,9 @@ const chatNs = io.of('/chat');
 const matchNs = io.of('/match');
 
 // In-memory matchmaking queues per gameType
-const QUEUE_TIMEOUT_MS = 12000;
+const QUEUE_TIMEOUT_MS = parseInt(process.env.MATCH_QUEUE_TIMEOUT_MS || '30000', 10);
+// Grace period to allow a disconnected player to rejoin before forfeit
+const REJOIN_GRACE_MS = parseInt(process.env.MATCH_REJOIN_GRACE_MS || '15000', 10);
 const queues = {
   ttt: [],
   rps: [],
@@ -170,6 +270,21 @@ const queues = {
 const joinTimeouts = new Map(); // socketId -> timeoutId
 // Presence: userId -> { username, inMatch: boolean, socketId }
 const onlineUsers = new Map();
+// Code lobbies: code -> { gameType, ownerUserId, ownerSocketId, createdAt }
+const codeLobbies = new Map();
+
+// ==================== In-Memory State ====================
+// In-memory match state: matchId -> state
+// For persistence beyond runtime, consider storing snapshots in Mongo.
+const matches = new Map();
+// Track rematch requests: matchId -> Set(userId)
+const rematchRequests = new Map();
+// Track AI difficulty per matchId: 'easy' | 'medium' | 'hard'
+const aiDifficulty = new Map();
+// Track ready state before first state.update: matchId -> Set(userId|'AI')
+const readySets = new Map();
+// Track pending disconnect forfeits: matchId -> { leftUserId, timerId }
+const pendingForfeits = new Map();
 
 function socketUser(socket) {
   try {
@@ -187,6 +302,11 @@ async function createHumanMatch(gameType, a, b) {
   const room = `match:${match._id.toString()}`;
   a.socket.join(room);
   b.socket.join(room);
+  // Instead of immediately starting, require both to Ready in match namespace
+  const info = [
+    { id: a.userId, username: onlineUsers.get(a.userId)?.username || 'Player 1', ready: false },
+    { id: b.userId, username: onlineUsers.get(b.userId)?.username || 'Player 2', ready: false },
+  ];
   lobbyNs.to(a.socket.id).emit('match.found', { matchId: match._id, room });
   lobbyNs.to(b.socket.id).emit('match.found', { matchId: match._id, room });
 }
@@ -200,21 +320,28 @@ async function createAiMatch(gameType, player, difficulty = 'medium') {
   lobbyNs.to(player.socket.id).emit('match.found', { matchId: match._id, room, vs: 'ai' });
 }
 
+// Enforce auth for lobby namespace
+lobbyNs.use((socket, next) => {
+  const auth = socketUser(socket);
+  if (!auth) return next(new Error('unauthorized'));
+  socket.data.user = auth; // { userId, username }
+  next();
+});
+
 lobbyNs.on('connection', (socket) => {
   console.log('lobby connected', socket.id);
-  const auth = socketUser(socket);
-  if (auth) {
-    // Add/update presence
-    onlineUsers.set(auth.userId, { username: auth.username, inMatch: false, socketId: socket.id });
-    // Send current list to this user
-    const list = Array.from(onlineUsers.entries()).map(([id, v]) => ({ id, username: v.username, inMatch: v.inMatch }));
-    socket.emit('presence.list', list);
-    // Broadcast update
-    socket.broadcast.emit('presence.update', { id: auth.userId, username: auth.username, inMatch: false, online: true });
-  }
+  const auth = socket.data.user;
+  // Add/update presence
+  onlineUsers.set(auth.userId, { username: auth.username, inMatch: false, socketId: socket.id });
+  // Send current list to this user, excluding themselves
+  const list = Array.from(onlineUsers.entries())
+    .filter(([id]) => id !== auth.userId)
+    .map(([id, v]) => ({ id, username: v.username, inMatch: v.inMatch }));
+  socket.emit('presence.list', list);
+  // Broadcast update
+  socket.broadcast.emit('presence.update', { id: auth.userId, username: auth.username, inMatch: false, online: true });
 
   socket.on('queue.join', ({ gameType }) => {
-    if (!auth) return socket.emit('error', { message: 'unauthorized' });
     if (!['ttt', 'rps'].includes(gameType)) return;
     // Avoid duplicates
     queues[gameType] = queues[gameType].filter((q) => q.userId !== auth.userId);
@@ -244,15 +371,14 @@ lobbyNs.on('connection', (socket) => {
 
 
   socket.on('queue.leave', ({ gameType }) => {
-    if (!auth) return;
     if (!['ttt', 'rps'].includes(gameType)) return;
     queues[gameType] = queues[gameType].filter((q) => q.userId !== auth.userId);
     const t = joinTimeouts.get(socket.id);
     if (t) clearTimeout(t);
   });
 
+  
   socket.on('ai.accept', ({ gameType, difficulty }) => {
-    if (!auth) return;
     if (!['ttt', 'rps'].includes(gameType)) return;
     // Remove from queue if still there
     queues[gameType] = queues[gameType].filter((q) => q.userId !== auth.userId);
@@ -270,14 +396,72 @@ lobbyNs.on('connection', (socket) => {
     if (t) clearTimeout(t);
     joinTimeouts.delete(socket.id);
     // Remove presence if matches socket
-    if (auth) {
-      const cur = onlineUsers.get(auth.userId);
-      if (cur && cur.socketId === socket.id) {
-        onlineUsers.delete(auth.userId);
-        socket.broadcast.emit('presence.update', { id: auth.userId, online: false });
+    const cur = onlineUsers.get(auth.userId);
+    if (cur && cur.socketId === socket.id) {
+      onlineUsers.delete(auth.userId);
+      socket.broadcast.emit('presence.update', { id: auth.userId, online: false });
+    }
+    // Clean up any code lobbies owned by this user
+    for (const [code, info] of Array.from(codeLobbies.entries())) {
+      if (info.ownerUserId === auth.userId) {
+        codeLobbies.delete(code);
       }
     }
     console.log('lobby disconnected', socket.id);
+  });
+
+  // ============ Code-based Matchmaking ============
+  function genCode(len = 6) {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let out = '';
+    for (let i=0;i<len;i++) out += alphabet[Math.floor(Math.random()*alphabet.length)];
+    return out;
+  }
+
+  socket.on('code.create', ({ gameType }) => {
+    try {
+      if (!['ttt','rps'].includes(gameType)) return;
+      // Ensure user not already hosting a code
+      for (const [c, info] of codeLobbies.entries()) {
+        if (info.ownerUserId === auth.userId) {
+          return socket.emit('code.created', { code: c, gameType });
+        }
+      }
+      let code = genCode(6);
+      while (codeLobbies.has(code)) code = genCode(6);
+      codeLobbies.set(code, { gameType, ownerUserId: auth.userId, ownerSocketId: socket.id, createdAt: Date.now() });
+      socket.emit('code.created', { code, gameType });
+    } catch (e) {
+      console.error('code.create error', e);
+    }
+  });
+
+  socket.on('code.cancel', () => {
+    for (const [c, info] of Array.from(codeLobbies.entries())) {
+      if (info.ownerUserId === auth.userId) codeLobbies.delete(c);
+    }
+    socket.emit('code.canceled');
+  });
+
+  socket.on('code.join', async ({ code }) => {
+    try {
+      if (!code || typeof code !== 'string') return;
+      const entry = codeLobbies.get(code.toUpperCase());
+      if (!entry) return socket.emit('code.error', { message: 'Invalid code' });
+      // Find owner lobby socket
+      const ownerSocket = lobbyNs.sockets.get(entry.ownerSocketId);
+      if (!ownerSocket) {
+        codeLobbies.delete(code.toUpperCase());
+        return socket.emit('code.error', { message: 'Host is not available' });
+      }
+      // Create match between owner and joiner
+      await createHumanMatch(entry.gameType, { userId: entry.ownerUserId, socket: ownerSocket }, { userId: auth.userId, socket });
+      // Remove code so it can't be reused
+      codeLobbies.delete(code.toUpperCase());
+    } catch (e) {
+      console.error('code.join error', e);
+      socket.emit('code.error', { message: 'Failed to join with code' });
+    }
   });
 });
 
@@ -291,13 +475,6 @@ chatNs.on('connection', (socket) => {
 });
 
 // ==================== MATCH NAMESPACE ====================
-// In-memory match state: matchId -> state
-// For persistence beyond runtime, consider storing snapshots in Mongo.
-const matches = new Map();
-// Track rematch requests: matchId -> Set(userId)
-const rematchRequests = new Map();
-// Track AI difficulty per matchId: 'easy' | 'medium' | 'hard'
-const aiDifficulty = new Map();
 
 function tttCheckWinner(board) {
   const lines = [
@@ -463,15 +640,18 @@ matchNs.use((socket, next) => {
 });
 
 matchNs.on('connection', (socket) => {
-  const { userId } = socket.data.user;
+  const { userId, username } = socket.data.user;
   console.log('match connected', socket.id, userId);
   // Mark as in match and notify lobby listeners
   const p = onlineUsers.get(userId);
   if (p) {
     p.inMatch = true;
     onlineUsers.set(userId, p);
-    lobbyNs.emit('presence.update', { id: userId, inMatch: true });
+  } else {
+    // If user never opened the lobby, populate minimal presence so they still appear online
+    onlineUsers.set(userId, { username: username || 'Player', inMatch: true, socketId: undefined });
   }
+  lobbyNs.emit('presence.update', { id: userId, username, inMatch: true, online: true });
 
   async function emitStateForAll(matchId, room) {
     const state = matches.get(matchId);
@@ -515,6 +695,8 @@ matchNs.on('connection', (socket) => {
       const isParticipant = match.players.some((p) => p.toString() === userId);
       if (!isParticipant && match.playedVs !== 'ai') return socket.emit('error', { message: 'not a participant' });
       socket.join(room);
+      // Track which match this socket belongs to for disconnect handling
+      socket.data.matchId = matchId;
 
       // Initialize in-memory state if needed
       if (!matches.has(matchId)) {
@@ -540,7 +722,7 @@ matchNs.on('connection', (socket) => {
 
       const state = matches.get(matchId);
       const seat = state.players[0] === userId ? 0 : 1;
-      // Build playersInfo for initial emit
+      // Build playersInfo and emit lobby.wait until both ready
       let playersInfo = [];
       try {
         if (state.playedVs === 'human' && state.players.length === 2) {
@@ -562,9 +744,112 @@ matchNs.on('connection', (socket) => {
           ];
         }
       } catch {}
-      matchNs.to(socket.id).emit('state.update', { ...state, seat, matchId, playersInfo });
+
+      // initialize ready set for this match
+      if (!readySets.has(matchId)) readySets.set(matchId, new Set());
+      // auto-ready AI
+      if (state.playedVs === 'ai') readySets.get(matchId).add('AI');
+
+      const readyArr = Array.from(readySets.get(matchId));
+      matchNs.to(room).emit('lobby.wait', { matchId, playersInfo, ready: readyArr });
+
+      // If this user had previously disconnected and there is a pending forfeit, cancel it and notify opponent
+      const pf = pendingForfeits.get(matchId);
+      if (pf && pf.leftUserId === userId) {
+        clearTimeout(pf.timerId);
+        pendingForfeits.delete(matchId);
+        matchNs.to(room).emit('opponent.rejoined', { userId });
+      }
+
+      // If both players are already ready (e.g., this user joined late), start immediately
+      const set = readySets.get(matchId);
+      if (state.playedVs === 'human') {
+        const allReady = state.players.every((pid) => set.has(pid));
+        if (allReady) {
+          await emitStateForAll(matchId, room);
+        }
+      } else {
+        if (set.has(state.players[0]) && set.has('AI')) {
+          await emitStateForAll(matchId, room);
+        }
+      }
     } catch (e) {
       console.error('match.join error', e);
+    }
+  });
+
+  // Player indicates they are ready to start
+  socket.on('player.ready', async ({ matchId }) => {
+    try {
+      const room = `match:${matchId}`;
+      const match = await Match.findById(matchId);
+      if (!match) return;
+      const state = matches.get(matchId);
+      if (!state) return;
+      if (!readySets.has(matchId)) readySets.set(matchId, new Set());
+      const set = readySets.get(matchId);
+      set.add(userId);
+
+      // Re-emit lobby.wait update
+      let playersInfo = [];
+      try {
+        if (state.playedVs === 'human' && state.players.length === 2) {
+          const [u1, u2] = state.players;
+          const [a, b] = await Promise.all([
+            User.findById(u1, { username: 1 }).lean(),
+            User.findById(u2, { username: 1 }).lean(),
+          ]);
+          playersInfo = [
+            { id: u1, username: a?.username || 'Player 1' },
+            { id: u2, username: b?.username || 'Player 2' },
+          ];
+        } else {
+          const u1 = state.players[0];
+          const a = await User.findById(u1, { username: 1 }).lean();
+          playersInfo = [
+            { id: u1, username: a?.username || 'You' },
+            { id: 'AI', username: 'AI' },
+          ];
+        }
+      } catch {}
+      matchNs.to(room).emit('lobby.wait', { matchId, playersInfo, ready: Array.from(set) });
+
+      // Check both ready
+      const need = state.playedVs === 'human' ? state.players.length : 2; // human vs human 2 users, vs AI user + AI
+      if ((state.playedVs === 'human' && state.players.every((pid) => set.has(pid))) || (state.playedVs === 'ai' && set.has(state.players[0]) && set.has('AI'))) {
+        // Both ready: emit initial state to all
+        const sockets = await matchNs.in(room).fetchSockets();
+        sockets.forEach(async (s) => {
+          const uid = s.data?.user?.userId;
+          const seat = state.players[0] === uid ? 0 : 1;
+          let playersInfo2 = playersInfo;
+          try {
+            if (!playersInfo2 || playersInfo2.length === 0) {
+              if (state.playedVs === 'human' && state.players.length === 2) {
+                const [u1, u2] = state.players;
+                const [a, b] = await Promise.all([
+                  User.findById(u1, { username: 1 }).lean(),
+                  User.findById(u2, { username: 1 }).lean(),
+                ]);
+                playersInfo2 = [
+                  { id: u1, username: a?.username || 'Player 1' },
+                  { id: u2, username: b?.username || 'Player 2' },
+                ];
+              } else {
+                const u1 = state.players[0];
+                const a = await User.findById(u1, { username: 1 }).lean();
+                playersInfo2 = [
+                  { id: u1, username: a?.username || 'You' },
+                  { id: 'AI', username: 'AI' },
+                ];
+              }
+            }
+          } catch {}
+          matchNs.to(s.id).emit('state.update', { ...state, seat, matchId, playersInfo: playersInfo2 });
+        });
+      }
+    } catch (e) {
+      console.error('player.ready error', e);
     }
   });
 
@@ -662,13 +947,53 @@ matchNs.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log('match disconnected', socket.id);
     const p2 = onlineUsers.get(userId);
     if (p2) {
       p2.inMatch = false;
       onlineUsers.set(userId, p2);
-      lobbyNs.emit('presence.update', { id: userId, inMatch: false });
+    } else {
+      // Ensure presence update even if we didn't track earlier
+      onlineUsers.set(userId, { username: username || 'Player', inMatch: false, socketId: undefined });
+    }
+    lobbyNs.emit('presence.update', { id: userId, username, inMatch: false });
+
+    const matchId = socket.data?.matchId;
+    if (!matchId) return;
+    try {
+      const room = `match:${matchId}`;
+      const match = await Match.findById(matchId);
+      const state = matches.get(matchId);
+      if (!match || !state) return;
+      if (match.status === 'finished') return;
+
+      // Announce opponent left and start grace timer. If not back in time, forfeit
+      matchNs.to(room).emit('opponent.left', { userId });
+
+      // Avoid multiple timers
+      if (pendingForfeits.has(matchId)) return;
+      const timerId = setTimeout(async () => {
+        try {
+          // Determine winner: opponent or AI
+          let winner = null;
+          if (match.playedVs === 'ai') {
+            winner = 'AI';
+          } else if (state.players && state.players.length === 2) {
+            const isP0 = state.players[0] === userId;
+            winner = isP0 ? match.players[1] : match.players[0];
+          }
+          await finalizeMatch(matchId, winner);
+          matchNs.to(room).emit('match.end', { winner: winner?.toString() || null, result: 'forfeit' });
+        } catch (e) {
+          console.error('disconnect forfeit finalize error', e);
+        } finally {
+          pendingForfeits.delete(matchId);
+        }
+      }, REJOIN_GRACE_MS);
+      pendingForfeits.set(matchId, { leftUserId: userId, timerId });
+    } catch (e) {
+      console.error('match disconnect handling error', e);
     }
   });
 
@@ -720,6 +1045,8 @@ matchNs.on('connection', (socket) => {
         }
         // carry forward difficulty
         if (aiDifficulty.has(matchId)) aiDifficulty.set(newId, aiDifficulty.get(matchId));
+        // reset ready set and auto-ready AI; client will press ready
+        readySets.set(newId, new Set(['AI']));
         matchNs.to(socket.id).emit('rematch.created', { matchId: newId, vs: 'ai' });
         return;
       }
@@ -746,6 +1073,7 @@ matchNs.on('connection', (socket) => {
       } else {
         matches.set(newId, { gameType: 'rps', playedVs: 'human', choices: {}, players: match.players.map((p) => p.toString()) });
       }
+      readySets.set(newId, new Set());
       const sockets = await matchNs.in(room).fetchSockets();
       sockets.forEach((s) => matchNs.to(s.id).emit('rematch.created', { matchId: newId, vs: 'human' }));
       rematchRequests.delete(matchId);
@@ -787,6 +1115,10 @@ lobbyNs.on('connection', (socket) => {
       if (a.inMatch || b.inMatch) return;
       // Create human match using lobby namespace sockets
       const fromSocket = lobbyNs.sockets.get(a.socketId);
+      if (!fromSocket) {
+        socket.emit('invite.error', { message: 'User not available' });
+        return;
+      }
       await createHumanMatch(gameType, { userId: fromUserId, socket: fromSocket }, { userId: auth.userId, socket });
     } catch (e) {
       console.error('invite.accept error', e);
